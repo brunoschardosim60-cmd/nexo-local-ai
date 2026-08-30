@@ -1867,8 +1867,8 @@ export default function Home() {
                       O que vamos fazer?
                     </h1>
                     <p className="mx-auto mt-4 max-w-md text-sm leading-6 text-muted-foreground">
-                      Converse normalmente. Quando a tarefa pedir mais, o {BRAND_NAME}
-                      abre as ferramentas certas.
+                      Converse normalmente. Quando a tarefa pedir mais, o{' '}
+                      {BRAND_NAME} abre as ferramentas certas.
                     </p>
                   </div>
                 ) : (

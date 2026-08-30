@@ -25,8 +25,9 @@ Classificação baseada em implementação, teste executado e comportamento obse
 | Filesystem tools | STABLE | contratos, path boundary, tests | área autorizada ampla depende de configuração |
 | Git tools | FUNCTIONAL | allowlist e tests | não há ownership completo de diff pré-existente por hunk |
 | Shell sandbox | PARTIAL | spawn sem shell + allowlist | sem isolamento de OS, CPU/RAM ou rede forte |
-| Repository map/search | FUNCTIONAL | repository tests/eval | regex, sem Tree-sitter/LSP/call graph completo |
-| AST/Tree-sitter/LSP | PLANNED | nenhum runtime real encontrado | coding sem inteligência semântica profunda |
+| Repository map/search | FUNCTIONAL | TypeScript AST + repository tests/eval | referências ainda textuais; sem LSP/call graph completo |
+| TypeScript/JavaScript AST | FUNCTIONAL | compiler API do TypeScript | não cobre linguagens gerais nem type checker completo |
+| Tree-sitter/LSP | PLANNED | nenhum runtime real encontrado | coding sem inteligência semântica multiplataforma profunda |
 | Debug pipeline | PARTIAL | hypotheses/debug module | pouca prova end-to-end em projetos quebrados reais |
 | Browser DOM/click/type/tabs | FUNCTIONAL | Playwright + autonomy eval | provider Edge específico e sessão local |
 | Browser console/screenshot | FUNCTIONAL | provider + autonomy eval | visual verifier ainda limitado |
@@ -60,7 +61,6 @@ Classificação baseada em implementação, teste executado e comportamento obse
 | Living Eye organic motion | FUNCTIONAL | blink/saccade/breathing/reduced motion | estética exige revisão humana |
 | UX chat-first | FUNCTIONAL | screenshots + UX tests | `page.tsx` é god object e mode bar é permanente |
 | Artifacts | FUNCTIONAL | store/panel/image/video/audio render | provider real necessário para mídia pesada |
-| Responsive | FUNCTIONAL | screenshots anteriores 390/768/1440/1920 | faltava matriz completa 360/430/1024/1280 nesta rodada |
+| Responsive | FUNCTIONAL | screenshots reais em 360/390/430/768/1024/1280/1440/1920 | nenhum overflow horizontal observado |
 | Accessibility | PARTIAL | ARIA/reduced-motion/touch styling | falta auditoria automatizada dedicada |
 | Observability | FUNCTIONAL | logger/tracing/events/metrics | audit log HTTP é somente memória e limitado |
-
