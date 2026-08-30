@@ -1,4 +1,5 @@
 import { NEXO_SELF_MODEL, selfModelPrompt, selfSnapshot } from './self-model.mjs';
+import { isCapabilityQuestion, operationalCapabilityPrompt } from './operational-capabilities.mjs';
 
 const MAX_RESPONSES = 4;
 const MAX_ENTITIES = 8;
@@ -55,6 +56,7 @@ function forgetsAlias(value, state) {
 
 function inferTopic(value, previous = null) {
   const text = normalizeCasualInput(value);
+  if (isCapabilityQuestion(value)) return 'capabilities';
   if (/\b(?:nome|cham)\w*\b[\s\S]*\b(?:app|aplicativo|produto|marca|projeto)\b|\b(?:app|aplicativo|produto|marca|projeto)\b[\s\S]*\b(?:nome|cham)\w*\b/iu.test(text)) return 'creative-naming';
   if (/\b(?:cachorro|cão|cao|gata?|pet)\b/iu.test(text)) return 'pet';
   if (/\b(?:meu|nosso|o) projeto\b/iu.test(text)) return 'project';
@@ -217,7 +219,7 @@ function compactPrompt(state) {
   return lines.join('\n');
 }
 
-export function createConversationStateEngine(database) {
+export function createConversationStateEngine(database, { capabilityResolver = null } = {}) {
   const live = new Map();
 
   function load({ sessionId = 'main', profile = {} } = {}) {
@@ -260,12 +262,17 @@ export function createConversationStateEngine(database) {
     state.historySeenCount = safeHistory.length;
     const update = applyUserMessage(state, question, { context, profile });
     state = persist(state, profile);
+    const capabilityQuestion = isCapabilityQuestion(question);
+    const operationalCapabilities = capabilityQuestion ? capabilityResolver?.() || null : null;
+    const prompt = [compactPrompt(state), operationalCapabilityPrompt(operationalCapabilities)].filter(Boolean).join('\n\n');
     return {
       state,
       update,
       self: selfSnapshot(state),
-      prompt: compactPrompt(state),
-      workingSatisfiesMemory: Boolean(update.userName || update.alias || update.aliasForgotten || state.currentTopic === 'names' || update.referent),
+      prompt,
+      operationalCapabilities,
+      capabilityQuestion,
+      workingSatisfiesMemory: Boolean(capabilityQuestion || update.userName || update.alias || update.aliasForgotten || state.currentTopic === 'names' || update.referent),
       requiresEscalation: Boolean(update.referent && !state.currentTopic && !state.userName),
     };
   }

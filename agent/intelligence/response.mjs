@@ -83,7 +83,7 @@ export function evaluateConversationResponse(content, { context = 'casual', stat
     petRoleConfusion: introducesPetName && (!includesFact(text, state.petName) || /\b(?:meu nome|o meu nome)\b/i.test(text)),
     projectFactMissing: asksProject && !includesFact(text, state.projectDescription),
     promptLeak: text.includes(' | ') || recent.filter(item => item.length >= 12 && text.includes(item)).length >= 2,
-    greetingSupportClosing: greetingTurn && /\b(?:ajud|precisa|quer|necessita)\w*\b/iu.test(text),
+    greetingSupportClosing: greetingTurn && (CORPORATE_SENTENCE.test(text) || /\bo que (?:voc[eê] )?(?:precisa|quer que eu|necessita)\b/iu.test(text)),
     sociallyUnderdeveloped: casual && (greetingTurn || presenceTurn) && (text.match(/[\p{L}\p{N}]+/gu) || []).length < 7,
     greetingTimeMismatch: /^\s*bom dia\b/iu.test(question) && /^\s*boa noite\b/iu.test(text),
     presenceRoleConfusion: presenceTurn && !/\b(?:estou|t[oô]|aqui|sim)\b/iu.test(text),

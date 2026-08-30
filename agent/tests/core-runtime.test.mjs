@@ -83,5 +83,11 @@ test('Nexo Core expõe runtime completo e remove segredos do contexto', async ()
     assert.equal(redactSecrets('token=abcdefghijklmnop'), '[SEGREDO REMOVIDO]');
     assert.equal(permissionPolicy({ name: 'filesystem.read', risk: 'read' }, { path: '.ssh/id_rsa' }).decision, 'deny');
     assert.equal(permissionPolicy({ name: 'shell.run', risk: 'execute' }, { command: 'git', args: ['reset', '--hard'] }).decision, 'deny');
+    const selfKnowledge = await core.runtime.prepare({ question: 'oq tu sabe fazer?', sessionId: 'self-capabilities', profile: { personalityLearning: false }, history: [] });
+    assert.equal(selfKnowledge.route, 'capability');
+    assert.match(selfKnowledge.content, /código|arquivos|pesquisar/i);
+    const imageKnowledge = await core.runtime.prepare({ question: 'consegue gerar imagem?', sessionId: 'self-image', profile: { personalityLearning: false }, history: [] });
+    assert.equal(imageKnowledge.route, 'capability');
+    assert.match(imageKnowledge.content, /depende|Forge|provider/i);
   } finally { core.close(); await rm(directory, { recursive: true, force: true }); }
 });

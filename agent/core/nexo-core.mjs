@@ -9,6 +9,7 @@ import { createCodingAgent } from '../coding/coding-agent.mjs';
 import { createAgentConfig } from '../config.mjs';
 import { createContextEngine } from '../context/context-engine.mjs';
 import { createConversationStateEngine } from '../conversation/conversation-state.mjs';
+import { createOperationalCapabilitySnapshot } from '../conversation/operational-capabilities.mjs';
 import { createRag } from '../context/rag.mjs';
 import { createRepositoryIntelligence } from '../context/repository-map.mjs';
 import { createEventBus } from '../events/event-bus.mjs';
@@ -149,7 +150,19 @@ export function createNexoCore(overrides = {}) {
   const permissionManager = createPermissionManager(database);
   const memory = createLongTermMemory(database, embeddings, memoryGate);
   const personality = createPersonalityEngine(database);
-  const conversation = createConversationStateEngine(database);
+  const conversation = createConversationStateEngine(database, {
+    capabilityResolver: () => createOperationalCapabilitySnapshot({
+      toolNames: registry.describe().map((tool) => tool.name),
+      config,
+      health: {
+        image: image.health(),
+        audio: audio.health(),
+        video: video.health(),
+        vision: vision.health(),
+        browser: browserAutomation.health(),
+      },
+    }),
+  });
   const rag = createRag({
     database,
     workspace: config.workspace,

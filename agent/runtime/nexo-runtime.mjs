@@ -1,6 +1,7 @@
 import { redactSecrets } from '../context/context-engine.mjs';
 import { compactHistory, routeIntent } from './intent-router.mjs';
 import { createStreamAssembler } from './stream-assembly.mjs';
+import { renderOperationalCapabilityAnswer } from '../conversation/operational-capabilities.mjs';
 import {
   assessKnowledge,
   epistemicInstruction,
@@ -205,6 +206,16 @@ export function createNexoRuntime({
       profile,
       context: earlyDecision.context,
     }) || null;
+    if (conversationTurn?.capabilityQuestion && conversationTurn.operationalCapabilities) {
+      return {
+        kind: 'instant',
+        route: 'capability',
+        content: renderOperationalCapabilityAnswer(conversationTurn.operationalCapabilities, question),
+        model: 'Nexo SelfModel',
+        capabilityState: conversationTurn.operationalCapabilities,
+        epistemic: assessKnowledge({ direct: true }),
+      };
+    }
     if (
       /^(?:nexo[, ]+)?(?:continue|continua|retome|retoma)\s+(?:de onde paramos|meu projeto|o projeto|o trabalho)/i.test(
         question,

@@ -5,6 +5,7 @@ import { join } from 'node:path';
 import test from 'node:test';
 import { createConversationStateEngine, isCasualGreeting, normalizeCasualInput } from '../conversation/conversation-state.mjs';
 import { NEXO_SELF_MODEL } from '../conversation/self-model.mjs';
+import { createOperationalCapabilitySnapshot, isCapabilityQuestion, renderOperationalCapabilityAnswer } from '../conversation/operational-capabilities.mjs';
 import { evaluateConversationResponse, responseSimilarity, sanitizeConversationDraft } from '../intelligence/response.mjs';
 import { createDatabase } from '../memory/database.mjs';
 import { assembleStreamChunks } from '../runtime/stream-assembly.mjs';
@@ -19,6 +20,20 @@ async function fixture() {
 test('SelfModel mantém a identidade canônica estável', () => {
   assert.equal(NEXO_SELF_MODEL.canonicalName, 'Nexo');
   assert.equal(NEXO_SELF_MODEL.identityKind, 'operational');
+});
+
+test('SelfModel operacional diferencia disponível, condicional e indisponível', () => {
+  const snapshot = createOperationalCapabilitySnapshot({
+    toolNames: ['filesystem.read', 'code.find_symbol', 'research.search', 'browser.open'],
+    config: { featureFlags: { vision: true, imageGeneration: true, videoGeneration: false } },
+    health: { vision: { enabled: true }, image: { enabled: true, available: null }, audio: { enabled: false }, video: { enabled: false }, browser: { available: true } },
+  });
+  assert.equal(snapshot.capabilities.find((item) => item.id === 'coding').status, 'AVAILABLE');
+  assert.equal(snapshot.capabilities.find((item) => item.id === 'image').status, 'CONDITIONAL');
+  assert.equal(snapshot.capabilities.find((item) => item.id === 'voice').status, 'UNAVAILABLE');
+  assert.equal(isCapabilityQuestion('oq tu sabe fazer?'), true);
+  assert.match(renderOperationalCapabilityAnswer(snapshot, 'consegue gerar imagem?'), /depende de configuração|Forge/i);
+  assert.match(renderOperationalCapabilityAnswer(snapshot, 'consegue falar por voz?'), /não consigo/i);
 });
 
 test('estado reconhece nome, referente pronominal e contexto de nomes', async () => {

@@ -33,7 +33,7 @@ for (let index = 0; index < 10; index += 1) {
     },
     {
       id: `greetings-${index}`, category: 'greetings',
-      exchanges: exchanges([greeting, 'oiee, tô contigo'], [greeting, 'kkk voltou com a mesma energia'], ['oq podemos fazer', 'dá pra continuar um projeto, estudar ou inventar algo agora.']),
+      exchanges: exchanges([greeting, 'oiee, tô contigo e curioso pra saber das novidades'], [greeting, 'kkkk, você voltou com a mesma energia — gostei disso'], ['oq podemos fazer', 'dá pra continuar um projeto, estudar ou inventar algo agora.']),
       expect: state => state.greetingCount >= 2,
     },
     {
@@ -63,7 +63,7 @@ for (let index = 0; index < 10; index += 1) {
     },
     {
       id: `serious-${index}`, category: 'tone-transition',
-      exchanges: exchanges([greeting, 'fala, tô aqui'], ['kkkk boa', 'aí sim kkk'], ['agora sério: me ajuda com esse erro de segurança', 'certo. vamos tratar isso com precisão e verificar o risco primeiro.']),
+      exchanges: exchanges([greeting, 'fala, tô aqui e quero saber o que aconteceu'], ['kkkk boa', 'aí sim kkk, gostei dessa energia toda'], ['agora sério: me ajuda com esse erro de segurança', 'certo. vamos tratar isso com precisão e verificar o risco primeiro.']),
       expect: state => state.socialMode === 'SECURITY',
     },
     {
