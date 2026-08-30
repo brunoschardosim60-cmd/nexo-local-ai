@@ -1,4 +1,4 @@
-import type { AgentHealth, AgentTask, BackgroundJob, Chat, ChatMessage, Effort, LocalAttachment, LocalDocument, MediaArtifact, MediaJob, NexoMemory, NexoSkill, RuntimeEvent, RuntimeImmediateResponse, RuntimeStreamEvent, UserProfile } from './types';
+import type { AgentHealth, AgentTask, BackgroundJob, Chat, ChatMessage, Effort, LocalAttachment, LocalDocument, MediaArtifact, MediaJob, NexoMemory, NexoSkill, PersonalDashboard, PersonalGoal, PersonalSearchResult, PersonalSettings, PersonalSuggestion, PersonalTask, RuntimeEvent, RuntimeImmediateResponse, RuntimeStreamEvent, UserProfile } from './types';
 
 export const NEXO_AGENT_URL = 'http://127.0.0.1:7331';
 
@@ -67,6 +67,16 @@ export class NexoClient {
   async listBrowserSessions() { return jsonResponse(await fetch(`${this.baseUrl}/agent/browser/sessions`, { headers: this.headers() })); }
   async listMcpServers() { return jsonResponse(await fetch(`${this.baseUrl}/agent/mcp/servers`, { headers: this.headers() })); }
   async resetPersonality() { return jsonResponse(await fetch(`${this.baseUrl}/agent/personality/reset`, { method: 'POST', headers: this.headers(true), body: JSON.stringify({ confirmation: 'RESET' }) })); }
+  async personalDashboard() { return (await jsonResponse<{ dashboard: PersonalDashboard }>(await fetch(`${this.baseUrl}/agent/personal/dashboard`, { headers: this.headers() }))).dashboard; }
+  async createPersonalGoal(input: Pick<PersonalGoal, 'title'> & Partial<PersonalGoal>) { return (await jsonResponse<{ goal: PersonalGoal }>(await fetch(`${this.baseUrl}/agent/personal/goals`, { method: 'POST', headers: this.headers(true), body: JSON.stringify(input) }))).goal; }
+  async updatePersonalGoal(id: string, patch: Partial<PersonalGoal>) { return (await jsonResponse<{ goal: PersonalGoal }>(await fetch(`${this.baseUrl}/agent/personal/goals/${id}`, { method: 'POST', headers: this.headers(true), body: JSON.stringify({ patch, recalculateProgress: true }) }))).goal; }
+  async createPersonalTask(input: Pick<PersonalTask, 'title'> & Partial<PersonalTask>) { return (await jsonResponse<{ task: PersonalTask }>(await fetch(`${this.baseUrl}/agent/personal/tasks`, { method: 'POST', headers: this.headers(true), body: JSON.stringify(input) }))).task; }
+  async updatePersonalTask(id: string, patch: Partial<PersonalTask>) { return (await jsonResponse<{ task: PersonalTask }>(await fetch(`${this.baseUrl}/agent/personal/tasks/${id}`, { method: 'POST', headers: this.headers(true), body: JSON.stringify({ patch }) }))).task; }
+  async updatePersonalSettings(patch: Partial<PersonalSettings>) { return (await jsonResponse<{ settings: PersonalSettings }>(await fetch(`${this.baseUrl}/agent/personal/settings`, { method: 'POST', headers: this.headers(true), body: JSON.stringify({ patch }) }))).settings; }
+  async updateSuggestion(id: string, status: 'SEEN' | 'DISMISSED' | 'ACTED') { return (await jsonResponse<{ suggestion: PersonalSuggestion }>(await fetch(`${this.baseUrl}/agent/personal/suggestions/${id}`, { method: 'POST', headers: this.headers(true), body: JSON.stringify({ status }) }))).suggestion; }
+  async personalSearch(query: string, scope = 'global') { return (await jsonResponse<{ results: PersonalSearchResult[] }>(await fetch(`${this.baseUrl}/agent/personal/search?q=${encodeURIComponent(query)}&scope=${encodeURIComponent(scope)}`, { headers: this.headers() }))).results; }
+  async personalScan() { return jsonResponse<{ events: RuntimeEvent[]; suggestions: PersonalSuggestion[] }>(await fetch(`${this.baseUrl}/agent/personal/scan`, { method: 'POST', headers: this.headers(true), body: '{}' })); }
+  async clearPersonal(target: 'goals' | 'activity' | 'learning') { return jsonResponse(await fetch(`${this.baseUrl}/agent/personal/clear`, { method: 'POST', headers: this.headers(true), body: JSON.stringify({ target, confirmation: 'CLEAR' }) })); }
   async warmRuntime(effort: Effort) { return jsonResponse(await fetch(`${this.baseUrl}/agent/runtime/warm`, { method: 'POST', headers: this.headers(true), body: JSON.stringify({ effort }) })); }
   async getMediaJob(id: string) { return (await jsonResponse<{ job: MediaJob }>(await fetch(`${this.baseUrl}/agent/media/jobs/${id}`, { headers: this.headers() }))).job; }
   async getArtifact(id: string) { return (await jsonResponse<{ artifacts: MediaArtifact[] }>(await fetch(`${this.baseUrl}/agent/artifacts?limit=100`, { headers: this.headers() }))).artifacts.find(item => item.id === id) || null; }

@@ -22,6 +22,7 @@ O `Nexo Core` fica em `agent/`, separado da interface:
 - `workspace/`: estado persistente do projeto, baseline Git, arquitetura, scripts e `NEXO.md` sempre marcado como instrução não confiável.
 - `skills/` e `specialists/`: instruções locais recuperadas por intenção e perfis de programação, pesquisa, navegador, documentos e dados.
 - `background/` e `events/`: scheduler persistente e event bus local.
+- `personal/`: objetivos e tarefas pessoais persistentes, prioridade por evidências, contexto diário, retomada inteligente, busca unificada, estudo adaptativo, proatividade opt-in e triggers controlados.
 - `mcp/`: cliente MCP stdio JSON-RPC para servidores explicitamente configurados.
 
 A interface usa `lib/nexo` como SDK e `hooks/use-nexo-task-sync.ts` para acompanhar execuções. Chat, aquecimento de modelos, pesquisa, memória e ações passam pelo Runtime; a interface não mantém um segundo cérebro.
@@ -30,13 +31,15 @@ No modo **Agente**, o Nexo devolve o controle da interface imediatamente, cria u
 
 Perguntas determinísticas não acionam modelo. Conversa simples usa o 3B com prompt mínimo; memória, RAG e pesquisa só entram quando a intenção exige. O Router escolhe automaticamente entre chat, código, raciocínio, pesquisa, documentos, dados e visão, respeitando uma seleção explícita de esforço alto. O verificador confronta objetivo, critérios e evidências e termina em `PASS`, `FAIL` ou `UNCERTAIN`; `FAIL` e `UNCERTAIN` acionam o Critic e até três estratégias diferentes antes da conclusão.
 
-O Core 6 registra as tools dinamicamente. A inteligência de código usa AST TypeScript/JavaScript, declarações, chamadas e referências; debugging mantém hipóteses e experimentos persistentes. A pesquisa pode decompor perguntas e construir uma matriz multi-fonte de evidências, cobertura, datas e lacunas. Wikipedia, OpenAlex e Stack Overflow não exigem chave paga; toda chamada externa continua dependendo de aprovação. O modelo `qwen2.5vl:3b` interpreta imagens localmente. Geração raster usa Stable Diffusion WebUI/Forge quando esse provider estiver instalado e ativo; se não estiver, a UI informa a indisponibilidade e não fabrica um SVG como resultado.
+O Core 7 registra as tools dinamicamente. A inteligência de código usa AST TypeScript/JavaScript, declarações, chamadas e referências; debugging mantém hipóteses e experimentos persistentes. A pesquisa pode decompor perguntas e construir uma matriz multi-fonte de evidências, cobertura, datas e lacunas. Wikipedia, OpenAlex e Stack Overflow não exigem chave paga; toda chamada externa continua dependendo de aprovação. O modelo `qwen2.5vl:3b` interpreta imagens localmente. Geração raster usa Stable Diffusion WebUI/Forge quando esse provider estiver instalado e ativo; se não estiver, a UI informa a indisponibilidade e não fabrica um SVG como resultado.
+
+O V7 adiciona o painel **Meu dia** e a paleta `Ctrl+K`. Objetivos, tarefas, prazos, projetos conhecidos, estudo e eventos observáveis ficam separados da personalidade. Proatividade e notificações começam desligadas; `SUGGEST`, `ASK` e `ACT` são políticas distintas, e `ACT` exige confirmação explícita mais capabilities limitadas. Modo foco, quiet hours, orçamento de interrupções, repetição espaçada e briefs são controlados pelo usuário. O Nexo não afirma ter “visto” algo sem evento, tool ou memória que sustente a afirmação.
 
 O V6 não salva toda conversa indiscriminadamente. O Memory Gate V2 avalia utilidade, novidade, estabilidade, confiança, escopo, sensibilidade e duplicação. “Lembre que…” cria memória explícita; “esqueça…” exclui a correspondência encontrada. A central **Memória do Nexo** permite pesquisar, editar, confirmar, arquivar e apagar registros. Contradições preservam as duas evidências ou marcam a anterior como `SUPERSEDED`; nunca são sobrescritas silenciosamente. RAG usa hash de conteúdo e chunks guiados por estrutura para não reindexar arquivos inalterados.
 
 Quando o trabalho realmente pode ser dividido, `agents.delegate` cria de duas a quatro subtarefas vinculadas à tarefa principal. Elas são executadas em paralelo pelo runtime e cada especialista mantém seus próprios passos, limites, eventos, checkpoints e pedidos de permissão.
 
-Veja a arquitetura-base em [`docs/NEXO-CORE.md`](docs/NEXO-CORE.md), a auditoria da V5 em [`docs/NEXO-V5-REPORT.md`](docs/NEXO-V5-REPORT.md) e o relatório honesto do V6 em [`docs/NEXO-V6-REPORT.md`](docs/NEXO-V6-REPORT.md).
+Veja a arquitetura-base em [`docs/NEXO-CORE.md`](docs/NEXO-CORE.md), a auditoria da V5 em [`docs/NEXO-V5-REPORT.md`](docs/NEXO-V5-REPORT.md), o relatório do V6 em [`docs/NEXO-V6-REPORT.md`](docs/NEXO-V6-REPORT.md) e o relatório do V7 em [`docs/NEXO-V7-REPORT.md`](docs/NEXO-V7-REPORT.md).
 
 ## Requisitos
 
@@ -76,6 +79,7 @@ npm run eval:memory
 npm run eval:memory-long
 npm run eval:false-memory
 npm run eval:knowledge
+npm run eval:personal
 npm run benchmark:memory
 npm run benchmark:v4
 npm run benchmark:v5
@@ -91,6 +95,6 @@ Para MCP, copie `mcp-servers.example.json` para `data/mcp-servers.json` e config
 
 ## Privacidade
 
-O SQLite em `data/nexo.db` guarda localmente tarefas, planos, permissões, eventos, jobs, sessões de navegador, memórias, conflitos, entidades, relações, handoffs, skills e índices de documentos. O navegador mantém uma cópia de conveniência dos chats e preferências da interface. Os modelos e embeddings são executados pelo Ollama localmente. Registros `RESTRICTED` não entram em pesquisa ou navegação externa. Pesquisa, navegação e MCP só saem do computador após uma ação autorizada; nesses casos, apenas a consulta ou requisição necessária é enviada à fonte escolhida.
+O SQLite em `data/nexo.db` guarda localmente tarefas, planos, permissões, eventos, jobs, sessões de navegador, memórias, conflitos, entidades, relações, handoffs, skills, objetivos pessoais, tarefas pessoais, preferências de proatividade, conceitos de estudo e índices de documentos. O navegador mantém uma cópia de conveniência dos chats e preferências da interface. Os modelos e embeddings são executados pelo Ollama localmente. Registros `RESTRICTED` não entram em pesquisa ou navegação externa. Pesquisa, navegação e MCP só saem do computador após uma ação autorizada; nesses casos, apenas a consulta ou requisição necessária é enviada à fonte escolhida.
 
 O banco, logs, sessões, backups e índices locais são ignorados pelo Git e não são enviados ao GitHub.

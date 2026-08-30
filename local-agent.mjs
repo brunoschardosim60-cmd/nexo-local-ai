@@ -93,6 +93,25 @@ const server = createServer(async (request, response) => {
     if (request.method === 'GET' && url.pathname === '/agent/models/profiles') return send(response, 200, { ok: true, profiles: await core.profiles.refresh(), resources: core.resources.snapshot() });
     if (request.method === 'GET' && url.pathname === '/agent/media/jobs') return send(response, 200, { ok: true, jobs: core.mediaQueue.list(Math.min(Number(url.searchParams.get('limit')) || 30, 100)) });
     if (request.method === 'GET' && url.pathname === '/agent/artifacts') return send(response, 200, { ok: true, artifacts: core.artifacts.list(Math.min(Number(url.searchParams.get('limit')) || 30, 100)) });
+    if (request.method === 'GET' && url.pathname === '/agent/personal/dashboard') {
+      const settings = core.personal.store.getSettings();
+      const today = core.personal.work.dailyContext(new Date(), { persist: settings.dailyBriefEnabled });
+      return send(response, 200, { ok: true, dashboard: {
+        today, settings, goals: core.personal.store.listGoals({ limit: 100 }), tasks: core.personal.work.rankTasks({ limit: 200 }),
+        learning: core.personal.study.planToday({ limit: 8 }), suggestions: core.personal.store.listSuggestions({ status: 'PENDING', limit: 20 }),
+        projects: core.projectWorkspaces.list(), recent: core.eventBus.list({ limit: 40 }), triggers: core.personal.store.listTriggers(),
+      } });
+    }
+    if (request.method === 'GET' && url.pathname === '/agent/personal/goals') return send(response, 200, { ok: true, goals: core.personal.store.listGoals({ scope: url.searchParams.get('scope') || null, status: url.searchParams.get('status')?.split(',').filter(Boolean) || null, limit: Math.min(Number(url.searchParams.get('limit')) || 100, 1000) }) });
+    if (request.method === 'GET' && url.pathname === '/agent/personal/tasks') return send(response, 200, { ok: true, tasks: core.personal.work.rankTasks({ projectScope: url.searchParams.get('projectScope') || null, goalId: url.searchParams.get('goalId') || null, limit: Math.min(Number(url.searchParams.get('limit')) || 200, 1000) }) });
+    if (request.method === 'GET' && url.pathname === '/agent/personal/settings') return send(response, 200, { ok: true, settings: core.personal.store.getSettings() });
+    if (request.method === 'GET' && url.pathname === '/agent/personal/suggestions') return send(response, 200, { ok: true, suggestions: core.personal.store.listSuggestions({ status: url.searchParams.has('status') ? url.searchParams.get('status') || null : 'PENDING', limit: Math.min(Number(url.searchParams.get('limit')) || 50, 500) }) });
+    if (request.method === 'GET' && url.pathname === '/agent/personal/triggers') return send(response, 200, { ok: true, triggers: core.personal.store.listTriggers(url.searchParams.has('enabled') ? url.searchParams.get('enabled') === 'true' : null) });
+    if (request.method === 'GET' && url.pathname === '/agent/personal/study') return send(response, 200, { ok: true, concepts: core.personal.store.listConcepts({ scope: url.searchParams.get('scope') || null, dueBefore: url.searchParams.get('dueBefore') || null, limit: Math.min(Number(url.searchParams.get('limit')) || 200, 1000) }), plan: core.personal.study.planToday({ scope: url.searchParams.get('scope') || 'learning:global', limit: Math.min(Number(url.searchParams.get('limit')) || 8, 10) }) });
+    if (request.method === 'GET' && url.pathname === '/agent/personal/search') return send(response, 200, { ok: true, results: await core.personal.search.search(url.searchParams.get('q') || '', { scope: url.searchParams.get('scope') || 'global', limit: Math.min(Number(url.searchParams.get('limit')) || 30, 100) }) });
+    if (request.method === 'GET' && url.pathname === '/agent/personal/resume') return send(response, 200, { ok: true, resume: await core.personal.work.smartResume({ scope: url.searchParams.get('scope') || 'project:.', sessionId: url.searchParams.get('sessionId') || 'main' }) });
+    if (request.method === 'GET' && url.pathname === '/agent/personal/review') return send(response, 200, { ok: true, review: core.personal.work.endOfDay() });
+    if (request.method === 'GET' && url.pathname === '/agent/personal/project-health') return send(response, 200, { ok: true, health: core.personal.work.projectHealth(url.searchParams.get('scope') || 'project:.') });
 
     const artifactProvenanceMatch = url.pathname.match(/^\/agent\/artifacts\/([^/]+)\/provenance$/);
     if (request.method === 'GET' && artifactProvenanceMatch) { const provenance = core.artifacts.provenance(artifactProvenanceMatch[1]); return provenance ? send(response, 200, { ok: true, provenance }) : send(response, 404, { error: 'Artefato não encontrado.' }); }
@@ -114,6 +133,25 @@ const server = createServer(async (request, response) => {
     if (request.method !== 'POST') return send(response, 404, { error: 'Rota não encontrada.' });
 
     const input = await readBody(request);
+    const personalGoalMatch = url.pathname.match(/^\/agent\/personal\/goals\/([^/]+)$/);
+    const personalTaskMatch = url.pathname.match(/^\/agent\/personal\/tasks\/([^/]+)$/);
+    const personalSuggestionMatch = url.pathname.match(/^\/agent\/personal\/suggestions\/([^/]+)$/);
+    if (url.pathname === '/agent/personal/goals') { const goal = core.personal.store.createGoal(input); audit('personal_goal_created', goal.id, true, goal.title); return send(response, 201, { ok: true, goal }); }
+    if (personalGoalMatch) { const goal = core.personal.store.updateGoal(personalGoalMatch[1], input.patch || input); if (input.recalculateProgress) core.personal.work.updateGoalProgress(goal.id); audit('personal_goal_updated', goal.id, true, goal.status); return send(response, 200, { ok: true, goal: core.personal.store.getGoal(goal.id) }); }
+    if (url.pathname === '/agent/personal/tasks') { const task = core.personal.store.createTask(input); audit('personal_task_created', task.id, true, task.title); return send(response, 201, { ok: true, task }); }
+    if (personalTaskMatch) { const task = core.personal.store.updateTask(personalTaskMatch[1], input.patch || input); if (task.goalId) core.personal.work.updateGoalProgress(task.goalId); audit('personal_task_updated', task.id, true, task.status); return send(response, 200, { ok: true, task }); }
+    if (url.pathname === '/agent/personal/settings') { const settings = core.personal.store.updateSettings(input.patch || input); core.runtime.clearCache(); audit('personal_settings_updated', 'local', true, Object.keys(input.patch || input).join(',')); return send(response, 200, { ok: true, settings }); }
+    if (personalSuggestionMatch) { const suggestion = core.personal.store.updateSuggestion(personalSuggestionMatch[1], input.status); return send(response, 200, { ok: true, suggestion }); }
+    if (url.pathname === '/agent/personal/triggers') { const trigger = core.personal.proactivity.createTrigger(input); audit('personal_trigger_created', trigger.id, true, trigger.policy); return send(response, 201, { ok: true, trigger }); }
+    if (url.pathname === '/agent/personal/study/concepts') { const concept = core.personal.study.recordConcept(input); return send(response, 201, { ok: true, concept }); }
+    if (url.pathname === '/agent/personal/study/attempts') { const result = await core.personal.study.recordAttempt(input); return send(response, 201, { ok: true, result }); }
+    if (url.pathname === '/agent/personal/scan') { const events = await core.personal.proactivity.scan(); return send(response, 200, { ok: true, events, suggestions: core.personal.store.listSuggestions({ status: 'PENDING', limit: 20 }) }); }
+    if (url.pathname === '/agent/personal/brief') { const brief = core.personal.work.dailyContext(new Date(), { persist: true, kind: 'daily' }); return send(response, 200, { ok: true, brief }); }
+    if (url.pathname === '/agent/personal/clear') {
+      if (input.confirmation !== 'CLEAR') throw new Error('Confirmação CLEAR necessária.');
+      const result = input.target === 'goals' ? core.personal.store.clearGoals() : input.target === 'activity' ? core.personal.store.clearActivity() : input.target === 'learning' ? core.personal.store.clearLearning() : null;
+      if (!result) throw new Error('Use target goals, activity ou learning.'); audit('personal_clear', input.target, true, JSON.stringify(result)); return send(response, 200, { ok: true, result });
+    }
     if (url.pathname === '/chat') {
       const attachments = Array.isArray(input.attachments) ? input.attachments.slice(0, 4) : [];
       const requestedImage = input.mode === 'Imagens';

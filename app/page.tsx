@@ -5,7 +5,7 @@ import { ChangeEvent, type ReactNode, useEffect, useMemo, useRef, useState } fro
 import {
   ArrowUp, Bot, Check, Clock3, CloudSun, Code2, Copy, Download, Film, Gauge,
   FilePenLine, FileText, FolderPlus, Globe2, ImageIcon, Library, Menu, Mic, MicOff,
-  Moon, Network, Paperclip, Plus, RefreshCw, Search, Server, Settings2, ShieldCheck, Sparkles,
+  Keyboard, LayoutDashboard, Moon, Network, Paperclip, Plus, RefreshCw, Search, Server, Settings2, ShieldCheck, Sparkles,
   Sun, Table2, Trash2, Volume2, VolumeX, X,
 } from 'lucide-react';
 import Image from 'next/image';
@@ -27,6 +27,7 @@ import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from '
 import { Textarea } from '@/components/ui/textarea';
 import { NexoMark } from '@/components/nexo-mark';
 import { AgentTaskCard } from '@/components/nexo/agent-task-card';
+import { PersonalWorkspace } from '@/components/nexo/personal-workspace';
 
 type Weather = { label: string; temperature: number; apparent: number; wind: number; code: number };
 type WeatherApiResponse = { current: { temperature_2m: number; apparent_temperature: number; wind_speed_10m: number; weather_code: number } };
@@ -268,6 +269,8 @@ export default function Home() {
   const [selectedMemoryId, setSelectedMemoryId] = useState('');
   const [memoryDraft, setMemoryDraft] = useState('');
   const [memoryLoading, setMemoryLoading] = useState(false);
+  const [personalOpen, setPersonalOpen] = useState(false);
+  const [commandOpen, setCommandOpen] = useState(false);
   const [mobileOpen, setMobileOpen] = useState(false);
   const [theme, setTheme] = useState<'light' | 'dark'>('dark');
   const [profile, setProfile] = useState<UserProfile>(DEFAULT_PROFILE);
@@ -334,6 +337,13 @@ export default function Home() {
   useEffect(() => {
     messagesEnd.current?.scrollIntoView({ behavior: 'smooth' });
   }, [history.length, loading]);
+
+  useEffect(() => {
+    const listener = (event: KeyboardEvent) => {
+      if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'k') { event.preventDefault(); setCommandOpen(value => !value); }
+    };
+    window.addEventListener('keydown', listener); return () => window.removeEventListener('keydown', listener);
+  }, []);
 
   useNexoTaskSync({ chats, setChats, token: agentToken, profile, setOnline: setAgentOnline });
 
@@ -674,6 +684,8 @@ export default function Home() {
         <p className="mt-2 text-[11px] leading-5 text-muted-foreground">Chats e perfil ficam neste computador.</p>
       </div>
       <Button className="mt-2 justify-start" variant="ghost" onClick={() => { setSecurityOpen(true); setMobileOpen(false); }}><ShieldCheck /> Segurança e rede</Button>
+      <Button className="justify-start" variant="ghost" onClick={() => { setPersonalOpen(true); setMobileOpen(false); }}><LayoutDashboard /> Meu dia</Button>
+      <Button className="justify-start" variant="ghost" onClick={() => { setCommandOpen(true); setMobileOpen(false); }}><Keyboard /> Comandos <kbd className="ml-auto text-[9px] text-muted-foreground">Ctrl K</kbd></Button>
       <Button className="justify-start" variant="ghost" onClick={() => void openMemoryCenter()}><Library /> Memória do Nexo</Button>
       <Button className="justify-start" variant="ghost" onClick={() => { setProfileOpen(true); setMobileOpen(false); }}><Settings2 /> Meu perfil</Button>
     </div>
@@ -690,6 +702,8 @@ export default function Home() {
             <div className="min-w-0"><p className="truncate text-sm font-medium">{activeChat?.title ?? 'Nova conversa'}</p><p className="truncate text-xs text-muted-foreground">Local 3B/7B · esforço {effort.toLowerCase()} · perfil de {profile.name || 'usuário'}</p></div>
           </div>
           <div className="flex items-center gap-1.5">
+            <Button size="icon-sm" variant="ghost" aria-label="Abrir inteligência pessoal" title="Meu dia" onClick={() => setPersonalOpen(true)}><LayoutDashboard /></Button>
+            <Button size="icon-sm" variant="ghost" aria-label="Abrir paleta de comandos" title="Comandos (Ctrl+K)" onClick={() => setCommandOpen(true)}><Keyboard /></Button>
             <Button size="icon-sm" variant="ghost" aria-label="Central de segurança" title="Central de segurança" onClick={() => setSecurityOpen(true)}><ShieldCheck /></Button>
             <Button size="icon-sm" variant="ghost" aria-label={`Ativar tema ${theme === 'dark' ? 'claro' : 'escuro'}`} title={`Tema ${theme === 'dark' ? 'claro' : 'escuro'}`} onClick={toggleTheme}>{mounted && theme === 'dark' ? <Sun /> : <Moon />}</Button>
             <Badge variant="outline" className="hidden border-emerald-500/25 bg-emerald-500/8 text-emerald-600 dark:text-emerald-300 sm:flex"><span className="size-1.5 rounded-full bg-emerald-500" /> Local · sem tokens</Badge>
@@ -778,13 +792,16 @@ export default function Home() {
           ].map(item => { const Icon = item.icon; return <div key={item.name} className="rounded-2xl border border-border bg-card/55 p-3.5"><div className="flex items-center gap-3"><div className="grid size-9 shrink-0 place-items-center rounded-xl bg-muted text-muted-foreground"><Icon className="size-4" /></div><div className="min-w-0 flex-1"><p className="text-xs font-medium">{item.name}</p><p className="mt-0.5 truncate text-[11px] text-muted-foreground">{item.detail}</p></div><span className={`size-2 shrink-0 rounded-full ${item.active ? 'bg-emerald-500' : 'bg-muted-foreground/25'}`} /></div></div>; })}</div>
           {!weather && <Button className="mt-3 w-full" size="sm" variant="outline" onClick={useDeviceLocation}><CloudSun /> Usar localização</Button>}
           <Button className="mt-3 w-full" size="sm" variant="outline" onClick={() => setSecurityOpen(true)}><ShieldCheck /> Abrir central de segurança</Button>
+          <Button className="mt-3 w-full" size="sm" variant="outline" onClick={() => setPersonalOpen(true)}><LayoutDashboard /> Abrir meu dia</Button>
           <Button className="mt-3 w-full" size="sm" variant="outline" onClick={() => void openMemoryCenter()}><Library /> Gerenciar memória</Button>
-          <div className="mt-6 rounded-2xl border border-primary/15 bg-primary/7 p-4"><p className="text-xs font-medium text-primary">Nexo Core {agentHealth?.agent?.version || 'local'}</p><div className="mt-3 grid grid-cols-2 gap-2 text-[11px] text-muted-foreground">{['Goal Engine', 'DAG persistente', 'Capability tokens', 'Cancelamento real', 'Project Workspace', 'AST TypeScript', 'Playwright real', 'Context Engine', 'Memória V3', 'Grafo local', 'Continuidade', 'RAG incremental', 'Research Agent', 'Skills + MCP', 'Multi-agent 4×', 'Visual verifier'].map(capability => <span key={capability} className="rounded-lg bg-muted px-2 py-1.5">{capability}</span>)}</div></div>
+          <div className="mt-6 rounded-2xl border border-primary/15 bg-primary/7 p-4"><p className="text-xs font-medium text-primary">Nexo Core {agentHealth?.agent?.version || 'local'}</p><div className="mt-3 grid grid-cols-2 gap-2 text-[11px] text-muted-foreground">{['Objetivos pessoais', 'Tarefas + prazos', 'Prioridade por evidência', 'Smart Resume', 'Modo estudo', 'Recall ativo', 'Proatividade opt-in', 'Quiet hours', 'Busca unificada', 'Triggers seguros', 'DAG persistente', 'Capability tokens', 'Project Workspace', 'Context Engine', 'Memória V3', 'RAG incremental'].map(capability => <span key={capability} className="rounded-lg bg-muted px-2 py-1.5">{capability}</span>)}</div></div>
         </div></ScrollArea>
       </aside>
     </div>
 
     <Sheet open={mobileOpen} onOpenChange={setMobileOpen}><SheetContent side="left" className="w-[290px] border-border bg-sidebar p-0"><SheetHeader className="sr-only"><SheetTitle>Menu do Nexo</SheetTitle><SheetDescription>Chats e configurações</SheetDescription></SheetHeader>{sidebar}</SheetContent></Sheet>
+
+    <PersonalWorkspace open={personalOpen} commandOpen={commandOpen} token={agentToken} onOpenChange={setPersonalOpen} onCommandOpenChange={setCommandOpen} onPrompt={(value, nextMode) => { if (nextMode) setMode(nextMode); setPrompt(value); setNotice('Comando preparado. Revise e envie quando quiser.'); }} onNotice={setNotice} />
 
     <Dialog open={profileOpen} onOpenChange={setProfileOpen}>
       <DialogContent className="max-h-[calc(100dvh-2rem)] overflow-y-auto border border-border bg-card sm:max-w-md">

@@ -11,10 +11,10 @@ function nextDate({ delaySeconds = 0, runAt = null }) {
 }
 
 export function createBackgroundScheduler({ database, eventBus, tickMs = 5_000, autoStart = true }) {
-  let timer = null; let executor = null; let ticking = false;
+  let timer = null; let executor = null; let triggerFactory = null; let resourceManager = null; let ticking = false;
 
   function schedule({ name, objective, scheduleType = 'once', delaySeconds = 0, runAt = null, intervalSeconds = null }) {
-    if (!['once', 'interval'].includes(scheduleType)) throw new Error('Tipo de agendamento inválido.');
+    if (!['once', 'interval'].includes(scheduleType)) throw new Error('Use o Trigger Engine para agendamentos condicionais ou orientados a eventos.');
     const interval = scheduleType === 'interval' ? Math.max(MIN_INTERVAL_SECONDS, Number(intervalSeconds) || 0) : null;
     if (scheduleType === 'interval' && !intervalSeconds) throw new Error('Informe intervalSeconds para um agendamento recorrente.');
     const job = database.createBackgroundJob({
@@ -27,6 +27,8 @@ export function createBackgroundScheduler({ database, eventBus, tickMs = 5_000, 
 
   async function tick(now = new Date()) {
     if (ticking || !executor) return [];
+    const resource = resourceManager?.decide?.({ requiredRamMB: 128, priority: 9 });
+    if (resource?.decision === 'queue' || resource?.decision === 'reject') return [];
     ticking = true; const executed = [];
     try {
       for (const job of database.listDueBackgroundJobs(now.toISOString())) {
@@ -41,8 +43,8 @@ export function createBackgroundScheduler({ database, eventBus, tickMs = 5_000, 
           await eventBus.publish('background.dispatched', { jobId: updated.id, taskId: updated.lastTaskId, runCount: updated.runCount });
           executed.push(updated);
         } catch (error) {
-          const updated = database.updateBackgroundJob(claimed.id, { status: 'failed' });
-          await eventBus.publish('background.failed', { jobId: updated.id, error: error instanceof Error ? error.message : 'Falha desconhecida.' }, { level: 'error' });
+          const shouldRetry = claimed.runCount < 2; const updated = database.updateBackgroundJob(claimed.id, { status: shouldRetry ? 'active' : 'failed', nextRunAt: shouldRetry ? new Date(now.getTime() + (claimed.runCount + 1) * 300_000).toISOString() : claimed.nextRunAt, runCount: claimed.runCount + 1 });
+          await eventBus.publish('background.failed', { jobId: updated.id, error: error instanceof Error ? error.message : 'Falha desconhecida.', diagnosis: 'A execução não concluiu; o erro foi preservado para orientar a próxima tentativa.', retryScheduled: shouldRetry, attempt: updated.runCount }, { level: 'error' });
         }
       }
       return executed;
@@ -80,9 +82,10 @@ export function createBackgroundScheduler({ database, eventBus, tickMs = 5_000, 
 
   if (autoStart) start();
   return {
-    definitions, schedule, tick, start, setExecutor(value) { executor = value; },
+    definitions, schedule, tick, start, setExecutor(value) { executor = value; }, setTriggerFactory(value) { triggerFactory = value; }, setResourceManager(value) { resourceManager = value; },
+    scheduleEvent(input) { if (!triggerFactory) throw new Error('Trigger Engine indisponível.'); return triggerFactory(input); },
     list(limit) { return database.listBackgroundJobs(limit); }, cancel(id) { return database.updateBackgroundJob(id, { status: 'cancelled' }); },
     close() { if (timer) clearInterval(timer); timer = null; },
-    health() { const jobs = database.listBackgroundJobs(500); return { active: jobs.filter(job => job.status === 'active').length, total: jobs.length, running: Boolean(timer) }; },
+    health() { const jobs = database.listBackgroundJobs(500); return { version: '2.0.0', active: jobs.filter(job => job.status === 'active').length, total: jobs.length, running: Boolean(timer), types: ['one-time','recurring','conditional','event-driven'], resourceAware: Boolean(resourceManager), retryBudget: 3 }; },
   };
 }

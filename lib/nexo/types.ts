@@ -10,6 +10,15 @@ export type ChatMessage = {
 export type Chat = { id: string; title: string; messages: ChatMessage[]; updatedAt: number };
 export type LocalDocument = { name: string; content: string };
 export type UserProfile = { name: string; city: string; style: string; instructions: string };
+export type PersonalGoalStatus = 'IDEA' | 'ACTIVE' | 'PAUSED' | 'BLOCKED' | 'COMPLETED' | 'CANCELLED';
+export type PersonalTaskStatus = 'TODO' | 'IN_PROGRESS' | 'BLOCKED' | 'DONE' | 'CANCELLED';
+export type PersonalGoal = { id: string; title: string; description: string; scope: string; priority: number; status: PersonalGoalStatus; deadline?: string | null; progress: number; milestones: Array<{ id: string; title: string; status: string; progress: number; evidence?: unknown[] }>; dependencies: string[]; evidence: unknown[]; createdAt: string; updatedAt: string; completedAt?: string | null };
+export type PersonalTask = { id: string; goalId?: string | null; projectScope: string; title: string; description: string; priority: number; deadline?: string | null; estimatedMinutes?: number | null; dependencies: string[]; status: PersonalTaskStatus; evidence: unknown[]; createdAt: string; updatedAt: string; completedAt?: string | null; priorityEvaluation?: { score: number; reason: string; parts: Record<string, number> } };
+export type PersonalSettings = { proactivityLevel: 'OFF' | 'LOW' | 'NORMAL' | 'HIGH'; notificationsEnabled: boolean; quietHours: { enabled: boolean; start: string; end: string }; interruptionBudget: { maxPerDay: number; minMinutesBetween: number }; dailyBriefEnabled: boolean; endOfDayReviewEnabled: boolean; learningHistoryEnabled: boolean; spacedRepetitionEnabled: boolean; tutorMode: 'GUIDE' | 'TEACH' | 'CHALLENGE' | 'EXAM'; dontSpoil: boolean; focusMode: boolean };
+export type PersonalSuggestion = { id: string; kind: string; title: string; message: string; importance: number; confidence: number; reason: string; source: string; action: Record<string, unknown>; policy: 'SUGGEST' | 'ASK' | 'ACT'; status: string; createdAt: string };
+export type LearningConcept = { id: string; scope: string; name: string; mastery: number; confidence: number; lastReviewedAt?: string | null; nextReviewAt?: string | null; mistakes: unknown[]; dependencies: string[]; enabled: boolean };
+export type PersonalSearchResult = { kind: string; id: string; title: string; summary: string; scope: string; status?: string | null; updatedAt?: string | null; score: number };
+export type PersonalDashboard = { today: { date: string; activeGoals: PersonalGoal[]; pendingTasks: PersonalTask[]; importantDeadlines: Array<(PersonalGoal | PersonalTask) & { risk: { level: string; reason: string; confidence: number } }>; unfinishedWork: PersonalTask[]; recentChanges: RuntimeEvent[]; recommendedFocus?: { taskId: string; title: string; reason: string } | null }; settings: PersonalSettings; goals: PersonalGoal[]; tasks: PersonalTask[]; learning: { due: Array<{ concept: LearningConcept; reason: string; recommendedActivity: string }>; tutorMode: string; spacedRepetition: boolean }; suggestions: PersonalSuggestion[]; projects: Array<{ id: string; name: string; root: string; updatedAt?: string; state?: Record<string, unknown> }>; recent: RuntimeEvent[]; triggers: Array<Record<string, unknown>> };
 export type RuntimeRoute = 'instant' | 'fast' | 'deep' | 'agent';
 export type RuntimeContextStats = {
   historyMessages: number; contextChars: number; memoryLoaded: boolean; ragLoaded: boolean; researchLoaded: boolean;
@@ -87,6 +96,7 @@ export type AgentHealth = {
       memory?: { engine: string; records: number; memories: number; semantic: number; legacy: number; scopes: number; uncertain: number; hybridRetrieval: boolean; temporal: boolean; contradictions: boolean };
       knowledge?: { engine: string; entities: number; relations: number; maxTraversalDepth: number };
       continuity?: { engine: string; persistentHandoffs: boolean; projectAware: boolean };
+      personal?: Record<string, unknown>; personalWork?: Record<string, unknown>; study?: Record<string, unknown>; proactivity?: Record<string, unknown>; personalSearch?: Record<string, unknown>;
       visualVerification?: boolean;
       vision?: Record<string, unknown>; image?: Record<string, unknown>; video?: Record<string, unknown>; audio?: Record<string, unknown>; mediaQueue?: Record<string, unknown>;
     };
