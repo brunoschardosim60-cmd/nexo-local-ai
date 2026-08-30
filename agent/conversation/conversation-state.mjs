@@ -55,6 +55,9 @@ function forgetsAlias(value, state) {
 
 function inferTopic(value, previous = null) {
   const text = normalizeCasualInput(value);
+  if (/\b(?:nome|cham)\w*\b[\s\S]*\b(?:app|aplicativo|produto|marca|projeto)\b|\b(?:app|aplicativo|produto|marca|projeto)\b[\s\S]*\b(?:nome|cham)\w*\b/iu.test(text)) return 'creative-naming';
+  if (/\b(?:cachorro|cão|cao|gata?|pet)\b/iu.test(text)) return 'pet';
+  if (/\b(?:meu|nosso|o) projeto\b/iu.test(text)) return 'project';
   if (/\b(?:nome|cham|apelido)\w*\b/iu.test(text)) return 'names';
   if (/\b(?:bug|erro|c[oó]digo|program|typescript|javascript|python|react|api)\w*\b/iu.test(text)) return 'coding';
   if (/\b(?:estud|prova|mat[eé]ria|aprender)\w*\b/iu.test(text)) return 'study';
@@ -64,6 +67,8 @@ function inferTopic(value, previous = null) {
 
 function inferReferent(value, state) {
   const text = normalizeCasualInput(value).replace(/[?!.,]+$/g, '');
+  if (state.petName && /\b(?:nome dele|ele chama|chama ele)\b/u.test(text)) return 'pet.name';
+  if (/\b(?:qual|como)\s+(?:é\s+)?(?:seu|teu)\s+apelido\b/u.test(text) || /^(?:e\s+)?apelido$/u.test(text)) return 'assistant.alias';
   if (state.currentTopic === 'names' && /\b(?:se tivesse|se tivesse outro|qual seria)\b/u.test(text)) return 'assistant.alternativeName';
   if (state.currentTopic === 'names' && state.userName && text.includes(state.userName.toLowerCase()) && /\b(?:meu|minha)\b/u.test(text)) return 'user.name';
   if (/^(?:e\s+)?(?:qual\s+)?(?:é\s+)?(?:o\s+)?seu(?:\s+nome)?$/u.test(text)) {
@@ -94,6 +99,10 @@ function defaultState(sessionId, profile = {}, relationship = null) {
     socialMode: 'CASUAL',
     ongoingJokes: [],
     pendingQuestion: null,
+    responseLength: null,
+    selectedIdea: null,
+    petName: null,
+    projectDescription: null,
     lastCorrection: null,
     recentResponses: [],
     greetingCount: 0,
@@ -125,12 +134,20 @@ function boundedState(state) {
 function applyUserMessage(state, message, { context = 'casual', profile = {} } = {}) {
   const question = clean(message, 12_000);
   const previousTopic = state.currentTopic;
-  const correction = /^(?:mas|não|nao|na verdade|quis dizer|correção|correcao)\b/iu.test(normalizeCasualInput(question));
+  const correction = /^(?:mas\b|n[aã]o[, ]+(?:é|e|melhor|quis|eu|voc[eê]|tu)\b|na verdade\b|quis dizer\b|corre[cç][aã]o\b)/iu.test(normalizeCasualInput(question));
   const userName = explicitUserName(question);
   const alias = explicitAssistantAlias(question, state);
   const aliasForgotten = forgetsAlias(question, state);
   const topic = inferTopic(question, previousTopic);
   const referent = inferReferent(question, { ...state, currentTopic: topic });
+  const prefersShort = /\b(?:prefiro|quero|responda|fala|fale)\b[\s\S]*\b(?:respostas? )?(?:curtas?|diretas?|rápidas?)\b|\bmais curto\b/iu.test(question);
+  const selectedIdea = state.currentTopic === 'creative-naming'
+    ? question.match(/\b(?:gostei de|escolho|fica|vamos de)\s+([\p{L}\p{N}_-]{2,40})/iu)?.[1] || null
+    : null;
+  const petName = question.match(/\bmeu\s+(?:cachorro|cão|cao|gata?|pet)\s+(?:se\s+)?chama\s+([\p{L}\p{N}_-]{2,40})/iu)?.[1] || null;
+  const projectDescription = state.currentTopic === 'project'
+    ? question.match(/^\s*(?:ele|o projeto|isso)\s+(?:é|e)\s+(.{3,160})[.!?]?\s*$/iu)?.[1] || null
+    : null;
 
   if (userName) {
     state.userName = userName;
@@ -152,6 +169,16 @@ function applyUserMessage(state, message, { context = 'casual', profile = {} } =
     state.recentEntities.push(alias);
   }
   state.currentTopic = topic;
+  if (prefersShort) state.responseLength = 'short';
+  if (selectedIdea) {
+    state.selectedIdea = titleCaseName(selectedIdea);
+    state.recentEntities.push(state.selectedIdea);
+  }
+  if (petName) {
+    state.petName = titleCaseName(petName);
+    state.recentEntities.push(state.petName);
+  }
+  if (projectDescription) state.projectDescription = clean(projectDescription.replace(/[.!?]+$/g, ''), 180);
   state.tone = context;
   state.socialMode = String(context || 'casual').toUpperCase();
   state.referents = {
@@ -167,7 +194,7 @@ function applyUserMessage(state, message, { context = 'casual', profile = {} } =
   if (isCasualGreeting(question)) state.greetingCount += 1;
   state.pendingQuestion = /\?\s*$/.test(question) ? question : null;
   state.turnCount += 1;
-  return { userName, alias, aliasForgotten, correction, referent, normalized: normalizeCasualInput(question) };
+  return { userName, alias, aliasForgotten, correction, referent, prefersShort, selectedIdea, petName, projectDescription, normalized: normalizeCasualInput(question) };
 }
 
 function compactPrompt(state) {
@@ -175,7 +202,13 @@ function compactPrompt(state) {
   if (state.userName) lines.push(`Nome do usuário: ${state.userName}.`);
   lines.push(`Tom/modo social: ${state.tone}/${state.socialMode}.`);
   if (state.currentTopic) lines.push(`Assunto atual: ${state.currentTopic}.`);
+  if (state.responseLength === 'short') lines.push('Preferência confirmada do usuário: respostas curtas e diretas.');
+  if (state.selectedIdea) lines.push(`Escolha atual confirmada no assunto criativo: ${state.selectedIdea}.`);
+  if (state.petName) lines.push(`Fato relacional confirmado: o animal do usuário se chama ${state.petName}; isso não altera a identidade do Nexo.`);
+  if (state.projectDescription) lines.push(`Descrição confirmada do projeto atual: ${state.projectDescription}. Não acrescente finalidade ou características não ditas.`);
+  if (state.assistantAlias && normalizeCasualInput(state.pendingQuestion || '').includes(String(state.assistantAlias).toLowerCase())) lines.push(`Quando o usuário diz ${state.assistantAlias}, ele está chamando o Nexo pelo apelido; não interprete como outro assunto.`);
   if (state.referents?.current) lines.push(`Referente da mensagem atual: ${state.referents.current}.`);
+  if (state.referents?.current === 'assistant.alias') lines.push(state.assistantAlias ? `Resposta factual: o apelido atual do Nexo é ${state.assistantAlias}.` : 'Resposta factual: não há apelido ativo para o Nexo nesta relação. Não confunda com o nome alternativo hipotético Eco.');
   if (state.lastCorrection) lines.push(`Correção recente do usuário: ${state.lastCorrection.message}. A interpretação corrigida vence a anterior.`);
   if (state.greetingCount > 1) lines.push(`O usuário já cumprimentou ${state.greetingCount} vezes nesta conversa; reconheça continuidade e não repita a mesma saudação.`);
   if (state.recentResponses.length) lines.push(`Aberturas/respostas recentes do Nexo a não repetir literalmente: ${state.recentResponses.slice(-3).map(item => JSON.stringify(item.slice(0, 160))).join('; ')}.`);

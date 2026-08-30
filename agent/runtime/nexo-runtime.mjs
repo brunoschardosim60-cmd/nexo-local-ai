@@ -74,12 +74,13 @@ function groundedIdentityFallback(state = {}) {
 }
 
 function guardedConversationFallback(prepared, quality, content) {
-  if (quality?.failures?.some(item => ['canonicalNameMissing', 'activeAliasMissing', 'identityContradiction'].includes(item))) return groundedIdentityFallback(prepared.conversationState);
+  if (quality?.failures?.some(item => ['canonicalNameMissing', 'activeAliasMissing', 'identityContradiction', 'alternativeNameLeak'].includes(item))) return groundedIdentityFallback(prepared.conversationState);
   if (quality?.failures?.includes('templateRepetition') && /^\s*(?:o+i+e*|ol+a+|i+a+i+|e+a+e+|opa+)/iu.test(prepared.question)) {
     const greeting = String(prepared.question).trim().split(/\s+/)[0].slice(0, 24);
     return `${greeting} de novo 😄`;
   }
   if (quality?.failures?.some(item => ['genericAiDisclaimer', 'personaPreferenceDenied'].includes(item))) {
+    if (prepared.conversationState?.assistantAlias && String(prepared.question).toLowerCase().includes(String(prepared.conversationState.assistantAlias).toLowerCase())) return `Curto ${prepared.conversationState.assistantAlias}; funciona bem como meu apelido.`;
     return `Se for pra escolher, ${prepared.conversationState?.assistantCanonicalName || 'Nexo'} combina comigo.`;
   }
   if (quality?.failures?.some(item => ['topicDrift', 'alternativeNameMissing', 'alternativeRoleConfusion'].includes(item)) && prepared.conversationState?.referents?.current === 'assistant.alternativeName') {
@@ -89,9 +90,36 @@ function guardedConversationFallback(prepared, quality, content) {
     if (prepared.conversationState?.lastCorrection?.correctedField === 'userName') return `Entendi a correção: ${prepared.conversationState.userName} é o seu nome.`;
     if (prepared.conversationState?.lastCorrection?.correctedField === 'assistantAlias') return `Entendi a correção: o apelido agora é ${prepared.conversationState.assistantAlias}.`;
   }
-  if (quality?.failures?.includes('aliasAssignmentRoleConfusion') && prepared.conversationState?.assistantAlias) {
+  if (quality?.failures?.some(item => ['aliasAssignmentRoleConfusion', 'aliasAssignmentReciprocalConfusion'].includes(item)) && prepared.conversationState?.assistantAlias) {
     return `Fechado — ${prepared.conversationState.assistantAlias} fica como meu apelido.`;
   }
+  if (quality?.failures?.some(item => ['aliasUsedAsUserName', 'canonicalUsedAsUserName', 'aliasAssignmentRejected'].includes(item)) && prepared.conversationState?.assistantAlias) {
+    return `Fechado — ${prepared.conversationState.assistantAlias} fica como meu apelido.`;
+  }
+  if (quality?.failures?.includes('aliasAnswerMismatch')) {
+    return prepared.conversationState?.assistantAlias
+      ? `Meu apelido com você é ${prepared.conversationState.assistantAlias}.`
+      : 'Agora não tenho nenhum apelido ativo com você.';
+  }
+  if (quality?.failures?.includes('aliasPreferenceRoleConfusion') && prepared.conversationState?.assistantAlias) {
+    return `Curto ${prepared.conversationState.assistantAlias}; tem personalidade e funciona bem como apelido.`;
+  }
+  if (quality?.failures?.includes('responsePreferenceMissing')) return 'Você prefere respostas curtas e diretas.';
+  if (quality?.failures?.includes('selectedIdeaMissing') && prepared.conversationState?.selectedIdea) return `${prepared.conversationState.selectedIdea}.`;
+  if (quality?.failures?.includes('userNameAcknowledgementMissing') && prepared.conversationState?.userName) return `${prepared.conversationState.userName}. Fechado.`;
+  if (quality?.failures?.includes('petRoleConfusion') && prepared.conversationState?.petName) return `Seu animal se chama ${prepared.conversationState.petName}. Entendi.`;
+  if (quality?.failures?.includes('projectFactMissing') && prepared.conversationState?.projectDescription) return `O projeto é ${prepared.conversationState.projectDescription}.`;
+  if (quality?.failures?.includes('promptLeak')) {
+    if (/\b(?:gosta|curte|prefere|acha)\b/i.test(prepared.question)) return `Curto ${prepared.conversationState?.assistantAlias || prepared.conversationState?.assistantCanonicalName || 'Nexo'}; combina comigo.`;
+    return content.split('|')[0].trim();
+  }
+  if (quality?.failures?.includes('obviousCasualIntentDodged')) return 'A gente pode continuar algum projeto, criar algo, estudar ou só trocar uma ideia. Eu escolheria pelo que estiver mais interessante agora.';
+  if (quality?.failures?.some(item => ['greetingSupportClosing', 'greetingTimeMismatch'].includes(item))) {
+    const greeting = String(prepared.question).trim().replace(/[!?.,]+$/g, '').split(/\s+(?:bb|beb[eê]|nexo|mano|cara)\s*$/iu)[0].slice(0, 32);
+    return `${greeting}${prepared.conversationState?.greetingCount > 1 ? ' de novo' : ''} 😄`;
+  }
+  if (quality?.failures?.includes('presenceRoleConfusion')) return 'Tô aqui.';
+  if (quality?.failures?.includes('forgottenAliasFabricated')) return 'Beleza, removi o apelido desta conversa.';
   return content;
 }
 
@@ -151,7 +179,7 @@ export function createNexoRuntime({
       context: earlyDecision.context,
     }) || null;
     if (
-      /^(?:nexo[, ]+)?(?:continue|continua|retome|retoma)(?:\s+(?:de onde paramos|meu projeto|o projeto|o trabalho))?/i.test(
+      /^(?:nexo[, ]+)?(?:continue|continua|retome|retoma)\s+(?:de onde paramos|meu projeto|o projeto|o trabalho)/i.test(
         question,
       ) &&
       personal
@@ -543,8 +571,8 @@ export function createNexoRuntime({
       conversationState: conversationTurn?.state || null,
       conversationUpdate: conversationTurn?.update || null,
       conversationPrompt,
-      responseGuard: ['casual', 'playful'].includes(decision.context) && Boolean(
-        conversationTurn?.update?.userName || conversationTurn?.update?.referent || conversationTurn?.update?.correction || conversationTurn?.update?.alias || conversationTurn?.update?.aliasForgotten || /\b(?:o que|oq)\s+(?:podemos|dá para|da pra)\b/iu.test(question) || /\b(?:gosta|curte|prefere|acha)\b[\s\S]*\b(?:nome|apelido)\b/iu.test(question) || /^\s*(?:o+i+e*|ol+a+|i+a+i+|e+a+e+|opa+)/iu.test(question),
+      responseGuard: ['casual', 'playful'].includes(decision.context) || Boolean(
+        conversationTurn?.update?.userName || conversationTurn?.update?.referent || conversationTurn?.update?.correction || conversationTurn?.update?.alias || conversationTurn?.update?.aliasForgotten || /\b(?:o que|oq)\s+(?:podemos|dá para|da pra)\b/iu.test(question) || /\b(?:gosta|curte|prefere|acha)\b[\s\S]*\b(?:nome|apelido)\b/iu.test(question) || /^\s*(?:o+i+e*|ol+a+|i+a+i+|e+a+e+|opa+)/iu.test(question)
       ),
       model: selectedModel,
       modelLabel: `${decision.route === 'fast' ? 'Nexo Fast' : 'Nexo Deep'} · ${selectedModel.includes(':3b') ? 'Qwen 3B' : selectedModel.includes(':7b') ? 'Qwen 7B' : selectedModel}`,

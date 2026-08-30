@@ -105,6 +105,7 @@ npm run eval:extensions
 npm run eval:coding-browser
 npm run eval:conversation
 npm run eval:conversation-live
+npm run eval:conversation-manual
 npm run eval:master
 npm run benchmark:conversation
 npm run benchmark:memory
@@ -112,7 +113,7 @@ npm run benchmark:v4
 npm run benchmark:v5
 ```
 
-`eval:intelligence` contém 200 casos de prontidão estrutural; ele não deve ser confundido com qualidade generativa. `eval:conversation` executa 120 conversas de 6 turnos (720 turnos) para identidade, apelidos, pronomes, correções, informalidade, tom e contradições; `eval:conversation-live` reproduz o transcript real no modelo local e mede TTFT. `benchmark:conversation` compara os modelos locais no mesmo conjunto social curto. `eval:autonomy` executa 36 verificações de capacidade, incluindo um navegador Edge real com DOM, clique, console e screenshot. `eval:coding-browser` mantém 20 gates determinísticos para objetivo, inspeção, validação, plano integrado e contratos de navegador; ele não substitui uma futura taxa de resolução com 20 projetos quebrados e o modelo local real. `eval:master` mantém golden tasks do control plane para routing, honestidade, segurança, linguagem e false-success; seu próprio relatório declara que não mede qualidade generativa. `eval:media` usa `SKIPPED` para providers realmente ausentes. `benchmark:v4` separa runtime, TTFT, total, cold/warm e modelo. O Router só usa um benchmark de qualidade persistido quando há pelo menos 10 amostras reais naquele domínio.
+`eval:intelligence` contém 200 casos de prontidão estrutural; ele não deve ser confundido com qualidade generativa. `eval:conversation` executa 120 conversas de 6 turnos (720 turnos) para identidade, apelidos, pronomes, correções, informalidade, tom e contradições; `eval:conversation-live` reproduz o transcript real no modelo local e mede TTFT; `eval:conversation-manual` executa as 20 conversas da amostra de revisão (no PowerShell, use `$env:NEXO_MANUAL_CASES='2,4'` para filtrar). `benchmark:conversation` compara os modelos locais no mesmo conjunto social curto. `eval:autonomy` executa 36 verificações de capacidade, incluindo um navegador Edge real com DOM, clique, console e screenshot. `eval:coding-browser` mantém 20 gates determinísticos para objetivo, inspeção, validação, plano integrado e contratos de navegador; ele não substitui uma futura taxa de resolução com 20 projetos quebrados e o modelo local real. `eval:master` mantém golden tasks do control plane para routing, honestidade, segurança, linguagem e false-success; seu próprio relatório declara que não mede qualidade generativa. `eval:media` usa `SKIPPED` para providers realmente ausentes. `benchmark:v4` separa runtime, TTFT, total, cold/warm e modelo. O Router só usa um benchmark de qualidade persistido quando há pelo menos 10 amostras reais naquele domínio.
 
 ## Skills e MCP
 

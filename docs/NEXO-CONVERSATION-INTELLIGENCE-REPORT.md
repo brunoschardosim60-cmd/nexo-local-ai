@@ -11,7 +11,7 @@ O transcript original não falhou por uma única frase ruim. O pipeline tinha se
 5. O Personality Engine controlava intensidade de traços, mas não recebia identidade, relação ou continuidade.
 6. Uma lista crescente de substituições em pós-processamento tentava esconder saídas ruins (`soumigo`, `Posso posso`), sem impedir que o modelo perdesse o fato antes de gerar.
 
-O modelo efetivo era `qwen2.5-coder:3b`. A auditoria do transporte mostrou NDJSON com deltas reais e concatenação em ordem; a corrupção observada veio do texto gerado, não de mistura de chunks na UI.
+O modelo efetivo era `qwen2.5-coder:3b`. A auditoria do transporte mostrou NDJSON com deltas reais e concatenação em ordem; a corrupção observada veio do texto gerado, não de mistura de chunks na UI. O benchmark posterior mostrou melhor consistência social no `qwen2.5vl:3b`, que passou a ser o FAST padrão; o coder continua disponível para código.
 
 ## Context pipeline
 
@@ -57,7 +57,8 @@ O apelido fica fora do canônico. `P1` é armazenado como alias com autor, escop
 - referente atual;
 - tom e modo social;
 - correção recente;
-- pergunta pendente;
+- pergunta pendente, preferência de tamanho e escolhas criativas;
+- fatos relacionais compactos de curto prazo, como nome de pet e descrição do projeto atual;
 - respostas recentes e contador de saudações.
 
 O estado é por chat; o alias confirmado também pode ser recuperado em outro chat da mesma relação. Trocar e esquecer alias atualiza o estado imediatamente. Referentes são limpos a cada turno para não contaminar a próxima mensagem.
@@ -82,14 +83,14 @@ Não foi encontrado bug de concatenação no Ollama → Runtime → NDJSON → R
 
 ## Evals
 
-- Testes do agente: **98/98**.
+- Testes do agente: **100/100**.
 - Conversation Intelligence: **120/120 conversas**, **720 turnos**, 12 categorias.
 - Latência do working state: mediana próxima de **1 ms**, p95 próximo de **3 ms** na execução final concorrente.
 - Transcript real ao vivo: **11/11 propriedades**.
 - Build, TypeScript e lint: PASS.
 - Master golden: atualizado para verificar sanidade estrutural, em vez de depender da antiga lista de correções por regex.
 
-Vinte conversas representativas foram revisadas por rubrica entre saudações, gírias, nomes, pronomes, aliases, correções, contradições e transição para assunto sério. A interface foi inspecionada separadamente: zero botões visíveis sem nome acessível e zero nós visíveis contendo o texto cru `svg`.
+Foram executadas e lidas **20 conversas ao vivo, 100 turnos**, entre saudações, gírias, nomes, pronomes, aliases, correções, preferências, projetos, estudo e transição séria. A revisão encontrou lacunas que a suíte estrutural não via — alias usado como nome do usuário, retomada antiga em `continua`, descrição de projeto inventada e escolha criativa esquecida. Esses casos originaram novos campos/guardas e uma segunda revisão dirigida de **7 conversas, 35 turnos**. A interface foi inspecionada separadamente: zero botões visíveis sem nome acessível e zero nós visíveis contendo o texto cru `svg`.
 
 ## Transcript regression
 
@@ -133,18 +134,19 @@ O avaliador não exige frases idênticas; ele verifica identidade, alias, refer�
 
 Antes da mudança, a reprodução local teve **65,9 s** na primeira resposta fria; depois, a mediana quente das demais ficou em **1,275 s**, mas perguntas de nome que acionavam memória chegaram a **4,274 s** e **8,609 s**. O caso observado na UI pelo usuário mostrou **8,8 s de TTFT** para uma saudação.
 
-Na execução final com o modelo residente:
+Na execução final com o novo FAST conversacional:
 
-- primeira resposta do run: cerca de **1,1 s**;
-- TTFT quente mediano: cerca de **1,5 s**;
-- p95 quente: cerca de **2,7 s**;
-- atualização do ConversationState: cerca de **3 ms** no p95 da execução concorrente.
+- primeira carga observada: cerca de **19,2 s**;
+- TTFT quente mediano: cerca de **2,0 s**;
+- p95 quente: cerca de **3,0 s**;
+- atualização do ConversationState: cerca de **2,2 ms** no p95 da execução final.
 
-O benchmark curto confirmou o trade-off: o 3B teve mediana de 777 ms após carga; o 7B levou 46 s na primeira carga e ~2,9 s quente; o modelo visual 3B levou 55 s na primeira carga e ~1,6 s quente. Por isso o chat casual continua no 3B, com verificação grounded, em vez de trocar toda saudação para um modelo pesado.
+O benchmark curto confirmou o trade-off: o coder 3B teve mediana de 777 ms após carga, mas falhou em linguagem social; o 7B levou 46 s na primeira carga e ~2,9 s quente; o visual 3B teve melhor score conversacional, com latência quente da mesma ordem do 3B anterior. Por isso o FAST passou ao `qwen2.5vl:3b`, sem jogar toda saudação no 7B.
 
 ## Limitations
 
-- O `qwen2.5-coder:3b` ainda pode produzir formulações socialmente estranhas antes do guard; o guard cobre invariantes, não transforma o modelo em um ótimo conversador.
+- O `qwen2.5vl:3b` ainda pode produzir formulações socialmente estranhas em conversa aberta; o guard cobre identidade, relação e fatos confirmados, mas não transforma um modelo 3B em um conversador de nível frontier.
+- A revisão manual ainda observou escolhas abertas pouco inspiradas e explicações de estudo com qualidade irregular; esses casos pedem um modelo local de chat melhor ou escalonamento seletivo, não mais regexes.
 - O alias de relação usa o nome/perfil local ou um identificador explícito; não há conta multiusuário completa.
 - A resolução de referentes cobre continuidade casual comum, não um parser linguístico universal.
 - O fallback grounded é deliberadamente pequeno e só cobre fatos operacionais críticos.

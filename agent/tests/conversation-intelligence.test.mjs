@@ -84,11 +84,37 @@ test('saudações repetidas ficam registradas para evitar loop de template', asy
   } finally { await f.close(); }
 });
 
+test('working state preserva escolha criativa, projeto, pet e preferência de tamanho', async () => {
+  const f = await fixture();
+  try {
+    f.engine.observeTurn({ sessionId: 'a', question: 'quero um nome para um app', profile: {} });
+    let turn = f.engine.observeTurn({ sessionId: 'a', question: 'gostei de Abissal', profile: {} });
+    assert.equal(turn.state.selectedIdea, 'Abissal');
+    f.engine.observeTurn({ sessionId: 'a', question: 'vamos falar do meu projeto', profile: {} });
+    turn = f.engine.observeTurn({ sessionId: 'a', question: 'ele é uma IA local', profile: {} });
+    assert.equal(turn.state.projectDescription, 'uma IA local');
+    turn = f.engine.observeTurn({ sessionId: 'a', question: 'meu cachorro chama Nexo', profile: {} });
+    assert.equal(turn.state.petName, 'Nexo');
+    turn = f.engine.observeTurn({ sessionId: 'a', question: 'prefiro respostas curtas', profile: {} });
+    assert.equal(turn.state.responseLength, 'short');
+    assert.equal(evaluateConversationResponse('Abaixo do Mar.', { context: 'casual', state: turn.state, question: 'qual foi o escolhido?' }).failures.includes('selectedIdeaMissing'), true);
+  } finally { await f.close(); }
+});
+
+test('negação séria não é confundida com correção factual', async () => {
+  const f = await fixture();
+  try {
+    const turn = f.engine.observeTurn({ sessionId: 'a', question: 'não brinca agora', profile: {} });
+    assert.equal(turn.update.correction, false);
+  } finally { await f.close(); }
+});
+
 test('sanity check detecta contradição, disclaimer, atendimento e repetição', () => {
   const state = { currentTopic: 'names', recentResponses: ['Oi! Como posso ajudar hoje?'] };
   assert.equal(evaluateConversationResponse('Eu não tenho nome.', { context: 'casual', state, question: 'qual seu nome?' }).pass, false);
   assert.equal(evaluateConversationResponse('Como uma IA, não tenho sentimentos.', { context: 'casual', state: {}, question: 'tu gosta?' }).pass, false);
   assert.equal(evaluateConversationResponse('Claro, posso te chamar de P1!', { context: 'casual', state: { assistantAlias: 'P1' }, question: 'posso te chamar de P1?' }).failures.includes('aliasAssignmentRoleConfusion'), true);
+  assert.equal(evaluateConversationResponse('Pode perguntar algo?', { context: 'casual', state: {}, question: 'oq podemos fazer' }).failures.includes('obviousCasualIntentDodged'), true);
   assert.equal(evaluateConversationResponse('Oi! Como posso ajudar hoje?', { context: 'casual', state, question: 'oi' }).failures.includes('templateRepetition'), true);
   assert.equal(responseSimilarity('oi, tô aqui', 'oi! tô aqui'), 1);
 });
