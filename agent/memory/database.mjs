@@ -406,9 +406,16 @@ export function createDatabase(dataDir) {
   }
   function deleteMemory(id) {
     const current = getMemory(id); if (!current) return false;
-    db.prepare('DELETE FROM memories_fts WHERE id = ?').run(id);
-    db.prepare('DELETE FROM memories WHERE id = ?').run(id);
-    return true;
+    db.exec('BEGIN IMMEDIATE');
+    try {
+      db.prepare('DELETE FROM memories_fts WHERE id = ?').run(id);
+      db.prepare('DELETE FROM memories WHERE id = ?').run(id);
+      db.exec('COMMIT');
+      return true;
+    } catch (error) {
+      db.exec('ROLLBACK');
+      throw error;
+    }
   }
   function reinforceMemory(id, { importance = 0.5, confidence = 0.7, confirmedAt = null } = {}) {
     db.prepare('UPDATE memories SET reinforcement_count = reinforcement_count + 1, importance = MIN(1, MAX(importance, ?)), confidence = MIN(0.99, MAX(confidence, ?)), last_confirmed_at = COALESCE(?, last_confirmed_at), last_accessed_at = ? WHERE id = ?').run(importance, confidence, confirmedAt, new Date().toISOString(), id);

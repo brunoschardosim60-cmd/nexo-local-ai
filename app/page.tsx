@@ -194,18 +194,6 @@ function cleanSvg(content: string) {
     : sanitized.replace(/^<svg\b/i, '<svg xmlns="http://www.w3.org/2000/svg"');
 }
 
-function hasDetailedVisual(svg: string) {
-  const shapes =
-    svg.match(/<(?:path|circle|ellipse|rect|polygon|polyline|line)\b/gi)
-      ?.length ?? 0;
-  const organicShapes =
-    svg.match(/<(?:path|circle|ellipse|polygon|polyline)\b/gi)?.length ?? 0;
-  const textElements = svg.match(/<text\b/gi)?.length ?? 0;
-  return (
-    shapes >= 8 && organicShapes >= 3 && !(textElements > 0 && shapes < 12)
-  );
-}
-
 function normalizeInput(value: string) {
   return value
     .normalize('NFD')
@@ -268,35 +256,6 @@ function isImageCreationRequest(question: string, history: ChatMessage[]) {
       ),
     );
   return isShortCommand && recentImageContext;
-}
-
-function escapeXml(value: string) {
-  return value.replace(
-    /[&<>"']/g,
-    (character) =>
-      ({
-        '&': '&amp;',
-        '<': '&lt;',
-        '>': '&gt;',
-        '"': '&quot;',
-        "'": '&apos;',
-      })[character] ?? character,
-  );
-}
-
-function fallbackSvg(prompt: string) {
-  const normalized = normalizeInput(prompt);
-  const isNotebook = /\b(note|notebook|laptop|computador)\b/.test(normalized);
-  const isComputerMouse =
-    /\bmouse\b/.test(normalized) &&
-    !/\b(rato|camundongo|animal)\b/.test(normalized);
-  const title = escapeXml(prompt.slice(0, 54) || 'Criação do Nexo');
-  const subject = isComputerMouse
-    ? `<g transform="translate(512 430)"><ellipse cx="18" cy="238" rx="238" ry="64" fill="#07091a" opacity=".55"/><path d="M4-284C-122-282-224-178-228-42l-3 126c-4 180 91 294 235 294S243 264 239 84l-3-126C232-178 130-282 4-284Z" fill="url(#mouseBody)" stroke="#b9aeff" stroke-width="11"/><path d="M4-277V-54" fill="none" stroke="#a89cff" stroke-width="8" opacity=".8"/><path d="M-214-45C-146-7-72 9 4 9S154-7 222-45" fill="none" stroke="#33267e" stroke-width="8"/><rect x="-25" y="-151" width="58" height="116" rx="29" fill="#12162f" stroke="#7df4dd" stroke-width="7"/><rect x="-8" y="-128" width="24" height="58" rx="12" fill="#baff78"/><path d="M-172 87C-133 149-76 181 4 181S141 149 180 87" fill="none" stroke="#8a78ef" stroke-width="6" opacity=".7"/><rect x="-220" y="58" width="18" height="82" rx="9" fill="#7df4dd"/><rect x="202" y="58" width="18" height="82" rx="9" fill="#7df4dd"/><circle cx="4" cy="257" r="12" fill="#c8ff7c"/><path d="M4 269c0 86 81 74 81 152 0 51-37 77-87 77" fill="none" stroke="#9f91ef" stroke-width="10" stroke-linecap="round"/></g>`
-    : isNotebook
-      ? `<g transform="translate(142 210)"><rect x="62" y="16" width="616" height="420" rx="34" fill="#11142a" stroke="#9f8cff" stroke-width="14"/><rect x="94" y="50" width="552" height="352" rx="16" fill="url(#screen)"/><circle cx="370" cy="34" r="6" fill="#d8d0ff"/><path d="M18 448h704l82 92c12 14 2 36-17 36H-47c-19 0-29-22-17-36l82-92Z" fill="#dad7ee"/><path d="M270 469h200l28 38H242l28-38Z" fill="#aaa5c5"/><rect x="-26" y="540" width="788" height="18" rx="9" fill="#7363d5"/></g>`
-      : `<g transform="translate(512 430)"><circle r="238" fill="url(#orb)" opacity=".95"/><path d="M-208 76C-92-122 60-170 212-58C96-48 8 24-38 164C-92 122-150 92-208 76Z" fill="#c9ff72" opacity=".88"/><circle cx="112" cy="-108" r="76" fill="#fff" opacity=".78"/></g>`;
-  return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" role="img" aria-label="${title}"><defs><linearGradient id="bg" x1="0" y1="0" x2="1" y2="1"><stop stop-color="#0c1025"/><stop offset="1" stop-color="#37266c"/></linearGradient><linearGradient id="screen" x1="0" y1="0" x2="1" y2="1"><stop stop-color="#6847e8"/><stop offset=".52" stop-color="#27c7d7"/><stop offset="1" stop-color="#b9ff73"/></linearGradient><linearGradient id="mouseBody" x1="0" y1="0" x2="1" y2="1"><stop stop-color="#8170ee"/><stop offset=".48" stop-color="#4e3bb5"/><stop offset="1" stop-color="#211b58"/></linearGradient><radialGradient id="orb"><stop stop-color="#9a84ff"/><stop offset=".58" stop-color="#4f37c8"/><stop offset="1" stop-color="#171b49"/></radialGradient><filter id="glow"><feGaussianBlur stdDeviation="28"/></filter></defs><rect width="1024" height="1024" rx="72" fill="url(#bg)"/><circle cx="770" cy="190" r="130" fill="#745cff" opacity=".26" filter="url(#glow)"/>${subject}<rect x="96" y="828" width="832" height="110" rx="30" fill="#080b1c" opacity=".66"/><text x="512" y="875" fill="#fff" text-anchor="middle" font-family="Arial, sans-serif" font-size="28" font-weight="700">CRIADO LOCALMENTE PELO NEXO</text><text x="512" y="912" fill="#cbc5eb" text-anchor="middle" font-family="Arial, sans-serif" font-size="19">${title}</text></svg>`;
 }
 
 function weatherDescription(code: number) {
@@ -1952,9 +1911,7 @@ export default function Home() {
                           : '';
                       const svg =
                         message.kind === 'image' && !message.artifact
-                          ? hasDetailedVisual(cleanedSvg)
-                            ? cleanedSvg
-                            : fallbackSvg(imagePrompt)
+                          ? cleanedSvg
                           : '';
                       const streaming =
                         loading &&
@@ -2054,7 +2011,9 @@ export default function Home() {
                                   alt="Diagrama SVG criado pelo Nexo"
                                 />
                                 <div className="mt-3 flex flex-wrap gap-2">
-                                  <Badge variant="outline">SVG vetorial</Badge>
+                                  <Badge variant="outline">
+                                    SVG legado · não é imagem gerada por modelo
+                                  </Badge>
                                   <Button
                                     size="sm"
                                     variant="outline"

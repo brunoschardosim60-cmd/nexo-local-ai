@@ -1,23 +1,36 @@
-export const ERROR_KIND = Object.freeze({ TRANSIENT: 'TRANSIENT', INVALID_INPUT: 'INVALID_INPUT', PERMISSION: 'PERMISSION', TOOL_UNAVAILABLE: 'TOOL_UNAVAILABLE', MODEL_FAILURE: 'MODEL_FAILURE', CONTEXT_FAILURE: 'CONTEXT_FAILURE', LOGIC_FAILURE: 'LOGIC_FAILURE', VERIFICATION_FAILURE: 'VERIFICATION_FAILURE', FATAL: 'FATAL' });
+import { ERROR_CATEGORY, normalizeErrorCategory } from '../contracts/errors.mjs';
+
+// Compatibilidade para consumidores antigos; todos os valores agora pertencem
+// ao mesmo contrato canônico usado por orchestrator e extensions.
+export const ERROR_KIND = Object.freeze({
+  ...ERROR_CATEGORY,
+  TOOL_UNAVAILABLE: ERROR_CATEGORY.MISSING_CAPABILITY,
+  MODEL_FAILURE: ERROR_CATEGORY.RESOURCE,
+  CONTEXT_FAILURE: ERROR_CATEGORY.RESOURCE,
+  LOGIC_FAILURE: ERROR_CATEGORY.UNKNOWN,
+  VERIFICATION_FAILURE: ERROR_CATEGORY.UNKNOWN,
+  FATAL: ERROR_CATEGORY.DEFINITIVE,
+});
 
 export function classifyFailure(error, { phase = 'tool', status = null } = {}) {
+  if (error?.category || error?.kind) return normalizeErrorCategory(error.category || error.kind);
   const message = String(error?.message || error || '').toLowerCase();
-  if (/timeout|tempor|transit|busy|locked|econnreset|eai_again|fetch failed|429|503/.test(message)) return ERROR_KIND.TRANSIENT;
-  if (/permiss|aprova|negad|unauthor|forbidden|401|403/.test(message)) return ERROR_KIND.PERMISSION;
+  if (/timeout|tempor|transit|busy|locked|econnreset|eai_again|fetch failed|429|503|rate.?limit/.test(message)) return ERROR_KIND.TRANSIENT;
+  if (/unauthor|autentica|token|credential|401/.test(message)) return ERROR_KIND.AUTH;
+  if (/permiss|aprova|negad|forbidden|403/.test(message)) return ERROR_KIND.PERMISSION;
   if (/inv[aá]lid|schema|obrigat[oó]ri|unknown field|n[aã]o faz parte/.test(message)) return ERROR_KIND.INVALID_INPUT;
-  if (/n[aã]o encontrad|unavailable|indispon[ií]vel|not installed|econnrefused/.test(message)) return ERROR_KIND.TOOL_UNAVAILABLE;
-  if (phase === 'model' || /ollama|modelo|model/.test(message)) return ERROR_KIND.MODEL_FAILURE;
-  if (phase === 'context' || /context|rag|mem[oó]ria/.test(message)) return ERROR_KIND.CONTEXT_FAILURE;
-  if (phase === 'verification' || status === 'UNCERTAIN') return ERROR_KIND.VERIFICATION_FAILURE;
-  if (phase === 'logic') return ERROR_KIND.LOGIC_FAILURE;
-  return ERROR_KIND.FATAL;
+  if (/n[aã]o encontrad|unavailable|indispon[ií]vel|not installed|econnrefused|ausente/.test(message)) return ERROR_KIND.MISSING_CAPABILITY;
+  if (phase === 'model' || phase === 'context' || /ollama|modelo|model|context|rag|mem[oó]ria|ram|vram|resource/.test(message)) return ERROR_KIND.RESOURCE;
+  if (phase === 'verification' || phase === 'logic' || status === 'UNCERTAIN') return ERROR_KIND.UNKNOWN;
+  return ERROR_KIND.DEFINITIVE;
 }
 
 export function recoveryPolicy(kind, attempt) {
-  if (kind === ERROR_KIND.PERMISSION) return { action: 'ask-user', retry: false };
-  if ([ERROR_KIND.INVALID_INPUT, ERROR_KIND.CONTEXT_FAILURE].includes(kind)) return { action: 'correct-input-or-context', retry: attempt < 2 };
-  if (kind === ERROR_KIND.TRANSIENT) return { action: 'retry-with-backoff', retry: attempt < 2 };
-  if ([ERROR_KIND.MODEL_FAILURE, ERROR_KIND.TOOL_UNAVAILABLE].includes(kind)) return { action: 'fallback-provider-or-model', retry: attempt < 2 };
-  if ([ERROR_KIND.LOGIC_FAILURE, ERROR_KIND.VERIFICATION_FAILURE].includes(kind)) return { action: 'replan-different-strategy', retry: attempt < 3 };
+  const category = normalizeErrorCategory(kind);
+  if ([ERROR_KIND.PERMISSION, ERROR_KIND.AUTH].includes(category)) return { action: 'ask-user', retry: false };
+  if (category === ERROR_KIND.INVALID_INPUT) return { action: 'correct-input-or-context', retry: attempt < 2 };
+  if (category === ERROR_KIND.TRANSIENT) return { action: 'retry-with-backoff', retry: attempt < 2 };
+  if ([ERROR_KIND.RESOURCE, ERROR_KIND.MISSING_CAPABILITY].includes(category)) return { action: 'fallback-provider-or-model', retry: attempt < 2 };
+  if (category === ERROR_KIND.UNKNOWN) return { action: 'replan-different-strategy', retry: attempt < 3 };
   return { action: 'stop', retry: false };
 }

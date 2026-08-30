@@ -49,6 +49,17 @@ test('validade temporal, arquivamento e exclusão física funcionam', () => fixt
   memory.forget(expired); assert.equal(database.getMemory(expired).status, 'FORGOTTEN'); assert.equal(memory.delete(expired), true); assert.equal(database.getMemory(expired), null);
 }));
 
+test('exclusão física é atômica e limpa índice e referência do grafo', () => fixture(async ({ database, memory, knowledge }) => {
+  const stored = await knowledge.rememberStructured('Projeto Removível usa SQLite.', { type: 'project', scope: 'project:delete', explicit: true });
+  assert.ok(stored?.memoryId);
+  assert.ok(database.searchMemoriesText('Removível').some(item => item.id === stored.memoryId));
+  assert.ok(knowledge.relations({ scope: 'project:delete' }).some(item => item.sourceMemoryId === stored.memoryId));
+  assert.equal(memory.delete(stored.memoryId), true);
+  assert.equal(database.getMemory(stored.memoryId), null);
+  assert.equal(database.searchMemoriesText('Removível').some(item => item.id === stored.memoryId), false);
+  assert.equal(knowledge.relations({ scope: 'project:delete' }).some(item => item.sourceMemoryId === stored.memoryId), false);
+}));
+
 test('grafo local extrai entidades e percorre relações em múltiplos saltos', () => fixture(async ({ knowledge }) => {
   await knowledge.rememberStructured('Projeto Nexo usa SQLite, React e TypeScript.', { type: 'project', scope: 'project:nexo', explicit: true, source: 'USER_EXPLICIT', relation: 'USES' });
   const entities = knowledge.entities({ scope: 'project:nexo', limit: 20 }); assert.ok(entities.length >= 4); const start = entities.find(item => item.type === 'PROJECT'); const graph = knowledge.traverse(start.id, { depth: 2 }); assert.ok(graph.relations.length >= 3); assert.ok(graph.entities.some(item => item.name === 'SQLite'));
