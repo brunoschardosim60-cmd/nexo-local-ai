@@ -21,6 +21,7 @@
     "eval:personal": "node agent/evals/personal-v7-eval.mjs",
     "eval:multimodal": "node agent/evals/multimodal-v8-eval.mjs",
     "eval:extensions": "node agent/evals/extensions-v9-eval.mjs",
+    "eval:coding-browser": "node agent/evals/coding-browser-v10-eval.mjs",
     "eval:master": "node agent/evals/master-golden-eval.mjs",
     "benchmark:memory": "node agent/evals/memory-v6-eval.mjs performance",
     "benchmark:v4": "node agent/evals/performance-v4.mjs",

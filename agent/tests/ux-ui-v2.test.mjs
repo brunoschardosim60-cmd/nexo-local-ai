@@ -80,3 +80,13 @@ test('Living Eye measures real microphone energy and applies smoothing', () => {
   assert.match(page, /voiceBoundaryRef/);
   assert.match(page, /voice-eye-level/);
 });
+
+test('Voice Presence supports partial speech, endpointing, streaming TTS and barge-in', () => {
+  assert.match(page, /recognition\.interimResults = true/);
+  assert.match(page, /queueStreamingSpeech\(responseTextV3/);
+  assert.match(page, /input: inputSource/);
+  assert.match(page, /interruptSpeechForBargeIn/);
+  assert.match(livingEye, /silenceFrames >= 42/);
+  assert.match(livingEye, /voiceFrames >= 11/);
+  assert.match(livingEye, /Conversa contínua/);
+});

@@ -9,7 +9,7 @@ import {
   useState,
 } from 'react';
 import { BRAND_NAME, PRODUCT_BRAND } from '@/lib/nexo/brand';
-import { Maximize2, Mic, MicOff, Square, X } from 'lucide-react';
+import { Maximize2, Mic, MicOff, Radio, Square, X } from 'lucide-react';
 import Image from 'next/image';
 import { cn } from '@/lib/utils';
 import { Button } from '@/components/ui/button';
@@ -202,11 +202,17 @@ export function NexoLivingEye({
     let timer = 0;
     const drift = () => {
       const calm = state === 'thinking' || state === 'working' ? 0.55 : 1;
+      const attentive =
+        state === 'listening' ? 0.62 : state === 'speaking' ? 0.78 : 1;
       setGaze({
-        x: (random() * 2 - 1) * 2.4 * calm,
-        y: (random() * 2 - 1) * 1.7 * calm,
+        x: (random() * 2 - 1) * 2.4 * calm * attentive,
+        y: (random() * 2 - 1) * 1.7 * calm * attentive,
       });
-      timer = window.setTimeout(drift, 1300 + random() * 3100);
+      const baseDelay =
+        state === 'listening' ? 520 : state === 'speaking' ? 760 : 1300;
+      const variation =
+        state === 'listening' ? 1450 : state === 'speaking' ? 1900 : 3100;
+      timer = window.setTimeout(drift, baseDelay + random() * variation);
     };
     drift();
     return () => window.clearTimeout(timer);
@@ -479,6 +485,11 @@ type VoiceModeProps = {
   outputLevel?: number;
   preview?: boolean;
   previewLevel?: number;
+  conversationEnabled?: boolean;
+  onConversationChange?: (enabled: boolean) => void;
+  onSpeechStart?: () => void;
+  onSpeechEnd?: () => void;
+  onBargeIn?: () => void;
   onListen: () => void;
   onStop: () => void;
 };
@@ -492,6 +503,11 @@ export function NexoVoicePresence({
   outputLevel = 0,
   preview = false,
   previewLevel = 0.46,
+  conversationEnabled = true,
+  onConversationChange,
+  onSpeechStart,
+  onSpeechEnd,
+  onBargeIn,
   onListen,
   onStop,
 }: VoiceModeProps) {
@@ -501,18 +517,20 @@ export function NexoVoicePresence({
   );
   const streamRef = useRef<MediaStream | null>(null);
   const audioFrame = useRef(0);
+  const voiceCallbacksRef = useRef({ onSpeechStart, onSpeechEnd, onBargeIn });
+  voiceCallbacksRef.current = { onSpeechStart, onSpeechEnd, onBargeIn };
 
   useEffect(() => {
-    if (!open || state !== 'listening') {
+    const shouldMonitor =
+      open &&
+      !preview &&
+      (state === 'listening' || (conversationEnabled && state === 'speaking'));
+    if (!shouldMonitor) {
       cancelAnimationFrame(audioFrame.current);
       streamRef.current?.getTracks().forEach((track) => track.stop());
       streamRef.current = null;
       setInputLevel(0);
       setAudioStatus('idle');
-      return;
-    }
-    if (preview) {
-      setAudioStatus('ready');
       return;
     }
     let cancelled = false;
@@ -540,6 +558,11 @@ export function NexoVoicePresence({
         let smooth = 0;
         let noiseFloor = 0.008;
         let tick = 0;
+        let voiceFrames = 0;
+        let silenceFrames = 0;
+        let speechActive = false;
+        let endpointSent = false;
+        let bargeInSent = false;
         const measure = () => {
           analyser.getFloatTimeDomainData(samples);
           let sum = 0;
@@ -558,6 +581,35 @@ export function NexoVoicePresence({
           const target = rawEnergy < 0.025 ? 0 : clamp(rawEnergy ** 0.82);
           smooth += (target - smooth) * (target > smooth ? 0.25 : 0.08);
           if (tick++ % 2 === 0) setInputLevel(smooth);
+          const voiceDetected = smooth > (state === 'speaking' ? 0.31 : 0.11);
+          voiceFrames = voiceDetected
+            ? voiceFrames + 1
+            : Math.max(0, voiceFrames - 2);
+          silenceFrames = voiceDetected ? 0 : silenceFrames + 1;
+          if (state === 'listening' && !speechActive && voiceFrames >= 4) {
+            speechActive = true;
+            endpointSent = false;
+            voiceCallbacksRef.current.onSpeechStart?.();
+          }
+          if (
+            state === 'listening' &&
+            speechActive &&
+            !endpointSent &&
+            silenceFrames >= 42
+          ) {
+            endpointSent = true;
+            speechActive = false;
+            voiceCallbacksRef.current.onSpeechEnd?.();
+          }
+          if (
+            state === 'speaking' &&
+            conversationEnabled &&
+            !bargeInSent &&
+            voiceFrames >= 11
+          ) {
+            bargeInSent = true;
+            voiceCallbacksRef.current.onBargeIn?.();
+          }
           audioFrame.current = requestAnimationFrame(measure);
         };
         setAudioStatus('ready');
@@ -571,7 +623,7 @@ export function NexoVoicePresence({
       streamRef.current = null;
       if (audioContext) void audioContext.close();
     };
-  }, [open, preview, previewLevel, state]);
+  }, [conversationEnabled, open, preview, state]);
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -586,7 +638,9 @@ export function NexoVoicePresence({
               NEXO
             </DialogTitle>
             <DialogDescription className="mt-1 text-xs">
-              Presença local
+              {conversationEnabled
+                ? 'Conversa contínua · local'
+                : 'Presença local'}
             </DialogDescription>
           </div>
           <div className="flex gap-2">
@@ -644,13 +698,35 @@ export function NexoVoicePresence({
         </main>
         <div className="nexo-voice-controls fixed bottom-0 left-1/2 z-20 flex -translate-x-1/2 items-center gap-3 pb-[calc(1.25rem+env(safe-area-inset-bottom))]">
           <Button
+            size="icon-lg"
+            variant={conversationEnabled ? 'secondary' : 'ghost'}
+            className="h-14 w-14 rounded-full border border-white/10 bg-white/7 text-white hover:bg-white/12"
+            aria-label={
+              conversationEnabled
+                ? 'Desativar conversa contínua'
+                : 'Ativar conversa contínua'
+            }
+            title={
+              conversationEnabled
+                ? 'Conversa contínua ativa'
+                : 'Conversa contínua desativada'
+            }
+            onClick={() => onConversationChange?.(!conversationEnabled)}
+          >
+            <Radio />
+          </Button>
+          <Button
             size="lg"
             variant={state === 'listening' ? 'secondary' : 'outline'}
             className="h-14 rounded-full border-white/12 bg-white/7 px-6 text-white hover:bg-white/12"
             onClick={onListen}
           >
             {state === 'listening' ? <MicOff /> : <Mic />}
-            {state === 'listening' ? 'Ouvindo' : 'Falar'}
+            {state === 'listening'
+              ? 'Ouvindo'
+              : conversationEnabled
+                ? 'Me escute'
+                : 'Falar'}
           </Button>
           <Button
             size="icon-lg"

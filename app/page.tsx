@@ -133,10 +133,18 @@ type GeocodingApiResponse = {
     longitude: number;
   }>;
 };
-type SpeechResultEvent = { results: ArrayLike<{ 0: { transcript: string } }> };
+type SpeechResult = {
+  0: { transcript: string };
+  isFinal?: boolean;
+};
+type SpeechResultEvent = {
+  resultIndex?: number;
+  results: ArrayLike<SpeechResult>;
+};
 type LocalSpeechRecognition = {
   lang: string;
   interimResults: boolean;
+  continuous?: boolean;
   start(): void;
   stop(): void;
   onstart: (() => void) | null;
@@ -458,6 +466,8 @@ export default function Home() {
   const [voiceOutput, setVoiceOutput] = useState(false);
   const [speaking, setSpeaking] = useState(false);
   const [voiceModeOpen, setVoiceModeOpen] = useState(false);
+  const [voiceConversation, setVoiceConversation] = useState(true);
+  const [voiceInterim, setVoiceInterim] = useState('');
   const [voiceCaption, setVoiceCaption] = useState('');
   const [voiceOutputLevel, setVoiceOutputLevel] = useState(0);
   const [voicePreviewState, setVoicePreviewState] =
@@ -497,6 +507,19 @@ export default function Home() {
   const messagesEnd = useRef<HTMLDivElement>(null);
   const requestController = useRef<AbortController | null>(null);
   const recognitionRef = useRef<LocalSpeechRecognition | null>(null);
+  const voiceModeRef = useRef(false);
+  const voiceConversationRef = useRef(true);
+  const voiceOutputRef = useRef(false);
+  const listeningRef = useRef(false);
+  const loadingRef = useRef(false);
+  const speakingRef = useRef(false);
+  const voiceRestartTimer = useRef(0);
+  const finalSpeechRef = useRef('');
+  const speechQueueRef = useRef<string[]>([]);
+  const speechQueueActiveRef = useRef(false);
+  const speechStreamDoneRef = useRef(true);
+  const speechStreamCursorRef = useRef(0);
+  const speechSuppressedRef = useRef(false);
   const voicePulseTimer = useRef(0);
   const voiceBoundaryRef = useRef({ charIndex: 0, elapsedMs: 0 });
 
@@ -525,6 +548,13 @@ export default function Home() {
               ? 'working'
               : 'thinking'
             : 'idle');
+
+  voiceModeRef.current = voiceModeOpen;
+  voiceConversationRef.current = voiceConversation;
+  voiceOutputRef.current = voiceOutput;
+  listeningRef.current = listening;
+  loadingRef.current = loading;
+  speakingRef.current = speaking;
 
   useEffect(() => {
     const storedChats = safeParse<Chat[]>(
@@ -594,6 +624,9 @@ export default function Home() {
         : [];
     const storedTheme = localStorage.getItem('nexo-theme');
     const storedEffort = localStorage.getItem('nexo-effort') as Effort | null;
+    setVoiceConversation(
+      localStorage.getItem('nexo-voice-conversation') !== 'off',
+    );
     const nextTheme =
       storedTheme === 'light' || storedTheme === 'dark'
         ? storedTheme
@@ -1022,60 +1055,76 @@ export default function Home() {
     );
   }
 
-  function startVoice() {
-    if (listening) {
-      recognitionRef.current?.stop();
+  function cleanSpeechText(text: string) {
+    return text
+      .replace(/```[\s\S]*?```/g, ' código disponível na tela ')
+      .replace(/[#*`>_-]/g, '')
+      .replace(/\s+/g, ' ')
+      .trim();
+  }
+
+  function scheduleVoiceListening(delay = 360) {
+    window.clearTimeout(voiceRestartTimer.current);
+    if (
+      !voiceModeRef.current ||
+      !voiceConversationRef.current ||
+      voicePreviewState !== null
+    )
       return;
-    }
-    const speechWindow = window as SpeechWindow;
-    const Recognition =
-      speechWindow.SpeechRecognition || speechWindow.webkitSpeechRecognition;
-    if (!Recognition) {
-      setNotice('O reconhecimento de voz não está disponível neste navegador.');
-      return;
-    }
-    speechSynthesis?.cancel();
+    voiceRestartTimer.current = window.setTimeout(() => {
+      if (!listeningRef.current && !loadingRef.current && !speakingRef.current)
+        startVoice();
+    }, delay);
+  }
+
+  function finishSpeechCycle() {
+    speechQueueActiveRef.current = false;
+    voiceBoundaryRef.current = { charIndex: 0, elapsedMs: 0 };
+    speakingRef.current = false;
     setSpeaking(false);
     setVoiceOutputLevel(0);
     if (agentToken)
       void new NexoClient(agentToken)
-        .updatePresence({ action: 'barge-in' })
+        .updatePresence({ action: 'update', patch: { speaking: false } })
         .catch(() => undefined);
-    const recognition = new Recognition();
-    recognitionRef.current = recognition;
-    recognition.lang = 'pt-BR';
-    recognition.interimResults = false;
-    recognition.onstart = () => setListening(true);
-    recognition.onend = () => {
-      recognitionRef.current = null;
-      setListening(false);
-    };
-    recognition.onerror = () => {
-      recognitionRef.current = null;
-      setListening(false);
-    };
-    recognition.onresult = (event) => setPrompt(event.results[0][0].transcript);
-    recognition.start();
+    scheduleVoiceListening(280);
   }
 
-  function speak(text: string) {
-    if (!voiceOutput || !('speechSynthesis' in window)) return;
-    const concise = text
-      .replace(/```[\s\S]*?```/g, ' código disponível na tela ')
-      .replace(/[#*`>_-]/g, '')
-      .split(/\n\n/)
-      .slice(0, 2)
-      .join(' ')
-      .slice(0, 650);
-    speechSynthesis.cancel();
-    const utterance = new SpeechSynthesisUtterance(concise);
+  function interruptSpeechForBargeIn() {
+    speechSuppressedRef.current = true;
+    speechStreamDoneRef.current = true;
+    speechQueueRef.current = [];
+    speechQueueActiveRef.current = false;
+    speechSynthesis?.cancel();
+    window.clearTimeout(voicePulseTimer.current);
+    speakingRef.current = false;
+    setSpeaking(false);
+    setVoiceOutputLevel(0);
+  }
+
+  function pumpSpeechQueue() {
+    if (
+      speechQueueActiveRef.current ||
+      speechSuppressedRef.current ||
+      !voiceOutputRef.current ||
+      !('speechSynthesis' in window)
+    )
+      return;
+    const next = speechQueueRef.current.shift();
+    if (!next) {
+      if (speechStreamDoneRef.current) finishSpeechCycle();
+      return;
+    }
+    speechQueueActiveRef.current = true;
+    const utterance = new SpeechSynthesisUtterance(next);
     utterance.lang = 'pt-BR';
-    utterance.rate = 0.98;
+    utterance.rate = 1.02;
     utterance.pitch = 1;
     utterance.onstart = () => {
       voiceBoundaryRef.current = { charIndex: 0, elapsedMs: 0 };
+      speakingRef.current = true;
       setSpeaking(true);
-      setVoiceCaption(concise);
+      setVoiceCaption(next);
       setVoiceOutputLevel(0.34);
       if (agentToken)
         void new NexoClient(agentToken)
@@ -1096,10 +1145,10 @@ export default function Home() {
         elapsedMs - voiceBoundaryRef.current.elapsedMs,
       );
       const cadence = Math.min(1, (charDelta / timeDelta) * 42);
-      const punctuation = /[,.!?;:]/.test(concise[event.charIndex - 1] || '');
+      const punctuation = /[,.!?;:]/.test(next[event.charIndex - 1] || '');
       const pulse = Math.max(
         0.2,
-        Math.min(0.82, 0.28 + cadence * 0.46 - (punctuation ? 0.09 : 0)),
+        Math.min(0.84, 0.28 + cadence * 0.48 - (punctuation ? 0.09 : 0)),
       );
       voiceBoundaryRef.current = { charIndex: event.charIndex, elapsedMs };
       setVoiceOutputLevel(pulse);
@@ -1109,27 +1158,131 @@ export default function Home() {
         punctuation ? 150 : 105,
       );
     };
-    utterance.onend = () => {
-      voiceBoundaryRef.current = { charIndex: 0, elapsedMs: 0 };
-      setSpeaking(false);
-      setVoiceOutputLevel(0);
-      if (agentToken)
-        void new NexoClient(agentToken)
-          .updatePresence({ action: 'update', patch: { speaking: false } })
-          .catch(() => undefined);
+    const continueQueue = () => {
+      speechQueueActiveRef.current = false;
+      if (speechQueueRef.current.length) pumpSpeechQueue();
+      else if (speechStreamDoneRef.current) finishSpeechCycle();
     };
+    utterance.onend = continueQueue;
+    utterance.onerror = continueQueue;
     speechSynthesis.speak(utterance);
+  }
+
+  function enqueueSpeechChunk(text: string) {
+    const clean = cleanSpeechText(text);
+    if (!clean || speechSuppressedRef.current || !voiceOutputRef.current)
+      return;
+    speechQueueRef.current.push(clean.slice(0, 520));
+    pumpSpeechQueue();
+  }
+
+  function queueStreamingSpeech(content: string, force = false) {
+    if (!voiceOutputRef.current || speechSuppressedRef.current) return;
+    let pending = content.slice(speechStreamCursorRef.current);
+    while (pending) {
+      const boundary = pending.match(/^[\s\S]*?[.!?](?:\s+|$)/)?.[0];
+      if (!boundary && !force) break;
+      const chunk = boundary || pending;
+      speechStreamCursorRef.current += chunk.length;
+      pending = content.slice(speechStreamCursorRef.current);
+      enqueueSpeechChunk(chunk);
+      if (!boundary) break;
+    }
+    if (force) {
+      speechStreamDoneRef.current = true;
+      if (!speechQueueActiveRef.current && !speechQueueRef.current.length)
+        finishSpeechCycle();
+    }
+  }
+
+  function startVoice() {
+    if (listeningRef.current) {
+      recognitionRef.current?.stop();
+      return;
+    }
+    const speechWindow = window as SpeechWindow;
+    const Recognition =
+      speechWindow.SpeechRecognition || speechWindow.webkitSpeechRecognition;
+    if (!Recognition) {
+      setNotice('O reconhecimento de voz não está disponível neste navegador.');
+      return;
+    }
+    if (speakingRef.current) interruptSpeechForBargeIn();
+    finalSpeechRef.current = '';
+    setVoiceInterim('');
+    if (agentToken)
+      void new NexoClient(agentToken)
+        .updatePresence({ action: 'barge-in' })
+        .catch(() => undefined);
+    const recognition = new Recognition();
+    recognitionRef.current = recognition;
+    recognition.lang = 'pt-BR';
+    recognition.interimResults = true;
+    recognition.continuous = false;
+    recognition.onstart = () => {
+      listeningRef.current = true;
+      setListening(true);
+    };
+    recognition.onend = () => {
+      recognitionRef.current = null;
+      listeningRef.current = false;
+      setListening(false);
+      if (!loadingRef.current && !speakingRef.current)
+        scheduleVoiceListening(520);
+    };
+    recognition.onerror = () => {
+      recognitionRef.current = null;
+      listeningRef.current = false;
+      setListening(false);
+      scheduleVoiceListening(850);
+    };
+    recognition.onresult = (event) => {
+      let interim = '';
+      let final = '';
+      for (
+        let index = event.resultIndex ?? 0;
+        index < event.results.length;
+        index += 1
+      ) {
+        const result = event.results[index];
+        const transcript = result?.[0]?.transcript?.trim() || '';
+        if (!transcript) continue;
+        if (result.isFinal === false) interim += `${transcript} `;
+        else final += `${transcript} `;
+      }
+      const visible = (final || interim).trim();
+      if (visible) {
+        setVoiceInterim(visible);
+        setPrompt(visible);
+      }
+      const finalText = final.trim();
+      if (finalText && finalText !== finalSpeechRef.current) {
+        finalSpeechRef.current = finalText;
+        setVoiceInterim('');
+        recognition.stop();
+        void askNexo(finalText, 'voice');
+      }
+    };
+    recognition.start();
+  }
+
+  function speak(text: string) {
+    if (!voiceOutputRef.current || !('speechSynthesis' in window)) return;
+    speechSuppressedRef.current = false;
+    speechStreamCursorRef.current = 0;
+    speechStreamDoneRef.current = false;
+    queueStreamingSpeech(cleanSpeechText(text).slice(0, 900), true);
   }
 
   function stopVoicePresence() {
     recognitionRef.current?.stop();
     recognitionRef.current = null;
-    speechSynthesis?.cancel();
+    interruptSpeechForBargeIn();
+    window.clearTimeout(voiceRestartTimer.current);
     window.clearTimeout(voicePulseTimer.current);
     voiceBoundaryRef.current = { charIndex: 0, elapsedMs: 0 };
     setListening(false);
-    setSpeaking(false);
-    setVoiceOutputLevel(0);
+    setVoiceInterim('');
     if (agentToken)
       void new NexoClient(agentToken).killPresence().catch(() => undefined);
   }
@@ -1365,9 +1518,12 @@ export default function Home() {
     }
   }
 
-  async function askNexo() {
-    const question = prompt.trim();
-    if (!question || loading) return;
+  async function askNexo(
+    questionOverride?: string,
+    inputSource: 'text' | 'voice' = 'text',
+  ) {
+    const question = (questionOverride ?? prompt).trim();
+    if (!question || loadingRef.current) return;
     const requestStarted = performance.now();
     const requestLooksLikeImage =
       mode === 'Imagens' ||
@@ -1379,6 +1535,7 @@ export default function Home() {
           ? 'Analisando com esforço extra alto…'
           : 'Preparando a resposta…',
     );
+    loadingRef.current = true;
     setLoading(true);
     setNotice('');
     setPrompt('');
@@ -1396,6 +1553,7 @@ export default function Home() {
       role: 'user',
       content: question,
       kind: 'text',
+      input: inputSource,
       attachments: requestAttachments.map(({ type, name, mimeType }) => ({
         type,
         name,
@@ -1430,6 +1588,14 @@ export default function Home() {
       let responseTextV3 = '';
       let firstTokenV3: number | undefined;
       let modelLabelV3 = 'Nexo Runtime V4';
+      if (voiceOutputRef.current) {
+        speechSynthesis?.cancel();
+        speechQueueRef.current = [];
+        speechQueueActiveRef.current = false;
+        speechStreamCursorRef.current = 0;
+        speechStreamDoneRef.current = false;
+        speechSuppressedRef.current = false;
+      }
       const immediate = await new NexoClient(agentToken).streamChat(
         {
           question,
@@ -1459,6 +1625,7 @@ export default function Home() {
             if (firstTokenV3 === undefined)
               firstTokenV3 = performance.now() - requestStarted;
             responseTextV3 += event.content;
+            queueStreamingSpeech(responseTextV3);
             if (displayStreamingV3) {
               const visible = responseTextV3;
               setChats((current) =>
@@ -1488,6 +1655,7 @@ export default function Home() {
           if (event.type === 'done') {
             responseTextV3 = event.content;
             modelLabelV3 = event.model;
+            queueStreamingSpeech(responseTextV3, true);
           }
         },
         requestController.current.signal,
@@ -1627,18 +1795,26 @@ export default function Home() {
         completeChatV3,
         ...chats.filter((chat) => chat.id !== baseChat.id),
       ]);
-      if (kindV3 === 'text') speak(responseTextV3);
       return;
     } catch (error) {
-      setNotice(
-        error instanceof Error
-          ? error.message
-          : 'Não consegui acessar o modelo local. Confirme se o Ollama está aberto e tente novamente.',
-      );
+      if (!(error instanceof DOMException && error.name === 'AbortError'))
+        setNotice(
+          error instanceof Error
+            ? error.message
+            : 'Não consegui acessar o modelo local. Confirme se o Ollama está aberto e tente novamente.',
+        );
     } finally {
+      loadingRef.current = false;
       setLoading(false);
       setAttachments([]);
       requestController.current = null;
+      if (
+        voiceModeRef.current &&
+        voiceConversationRef.current &&
+        !speakingRef.current &&
+        !speechQueueActiveRef.current
+      )
+        scheduleVoiceListening(420);
     }
   }
 
@@ -2356,7 +2532,13 @@ export default function Home() {
                         variant={voiceModeOpen ? 'secondary' : 'ghost'}
                         aria-label="Abrir conversa por voz"
                         title="Conversa por voz"
-                        onClick={() => setVoiceModeOpen(true)}
+                        onClick={() => {
+                          voiceModeRef.current = true;
+                          voiceOutputRef.current = true;
+                          setVoiceModeOpen(true);
+                          setVoiceOutput(true);
+                          window.setTimeout(() => startVoice(), 280);
+                        }}
                       >
                         <NexoLivingEyeMini state={voiceEyeState} />
                       </Button>
@@ -2366,8 +2548,10 @@ export default function Home() {
                         aria-label="Ler respostas em voz alta"
                         title="Voz do Nexo"
                         onClick={() => {
-                          setVoiceOutput((value) => !value);
-                          speechSynthesis?.cancel();
+                          const enabled = !voiceOutputRef.current;
+                          voiceOutputRef.current = enabled;
+                          setVoiceOutput(enabled);
+                          if (!enabled) interruptSpeechForBargeIn();
                         }}
                       >
                         {voiceOutput ? <Volume2 /> : <VolumeX />}
@@ -2487,10 +2671,12 @@ export default function Home() {
                 </div>
                 {notice && (
                   <button
-                    className="mx-auto mt-2 block rounded-lg px-3 py-1 text-center text-xs text-amber-600 hover:bg-amber-500/10 dark:text-amber-300"
+                    className="mx-auto mt-2 flex max-w-[min(100%,38rem)] items-center gap-2 rounded-full border border-border/70 bg-popover/92 px-3.5 py-1.5 text-left text-xs text-popover-foreground shadow-lg shadow-black/5 transition hover:bg-accent"
                     onClick={() => setNotice('')}
                   >
-                    {notice}
+                    <Sparkles className="size-3.5 shrink-0 text-primary" />
+                    <span className="truncate">{notice}</span>
+                    <X className="size-3 shrink-0 text-muted-foreground" />
                   </button>
                 )}
               </div>
@@ -2754,11 +2940,12 @@ export default function Home() {
       <NexoVoicePresence
         open={voiceModeOpen}
         onOpenChange={(open) => {
+          voiceModeRef.current = open;
           setVoiceModeOpen(open);
           if (!open) stopVoicePresence();
         }}
         state={voiceEyeState}
-        transcript={prompt}
+        transcript={voiceInterim || prompt}
         caption={voiceCaption}
         outputLevel={
           voicePreviewState === 'speaking'
@@ -2767,7 +2954,26 @@ export default function Home() {
         }
         preview={voicePreviewState !== null}
         previewLevel={voicePreviewLevel ?? undefined}
+        conversationEnabled={voiceConversation}
+        onConversationChange={(enabled) => {
+          voiceConversationRef.current = enabled;
+          setVoiceConversation(enabled);
+          localStorage.setItem(
+            'nexo-voice-conversation',
+            enabled ? 'on' : 'off',
+          );
+          if (enabled) scheduleVoiceListening(220);
+        }}
+        onSpeechEnd={() => recognitionRef.current?.stop()}
+        onBargeIn={() => {
+          requestController.current?.abort();
+          loadingRef.current = false;
+          setLoading(false);
+          interruptSpeechForBargeIn();
+          window.setTimeout(() => startVoice(), 80);
+        }}
         onListen={() => {
+          voiceOutputRef.current = true;
           setVoiceOutput(true);
           startVoice();
         }}

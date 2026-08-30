@@ -28,6 +28,9 @@ test('histórico é limitado por mensagens e caracteres', () => {
 
 test('normalização de português pertence ao Runtime e corrige erros conhecidos', () => {
   assert.equal(normalizePortugueseOutput('Posso respondo. Sou capacidade para ajudar.'), 'Posso responder. Tenho capacidade para ajudar.');
+  assert.equal(normalizePortugueseOutput('Oi! Como posso ajudar você hoje?'), 'Oi!');
+  assert.equal(normalizePortugueseOutput('O que está passando pela sua cabeça hoje?'), 'Tô por aqui.');
+  assert.equal(normalizePortugueseOutput('Oi, Bruno! Tudo ótimo, e você?'), 'Oi, Bruno! Tô por aqui.');
 });
 
 test('Personality Engine aprende preferência explícita, aplica limite de segurança e pode ser apagado', async () => {

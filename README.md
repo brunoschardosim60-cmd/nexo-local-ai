@@ -37,7 +37,9 @@ O Core registra as tools dinamicamente. A inteligência de código usa AST TypeS
 
 O V7 adiciona o painel **Meu dia** e a paleta `Ctrl+K`. Objetivos, tarefas, prazos, projetos conhecidos, estudo e eventos observáveis ficam separados da personalidade. Proatividade e notificações começam desligadas; `SUGGEST`, `ASK` e `ACT` são políticas distintas, e `ACT` exige confirmação explícita mais capabilities limitadas. Modo foco, quiet hours, orçamento de interrupções, repetição espaçada e briefs são controlados pelo usuário. O Nexo não afirma ter “visto” algo sem evento, tool ou memória que sustente a afirmação.
 
-O V8 formaliza mensagens com texto, imagens, áudio, vídeo, documentos, frames de tela/câmera e metadata. O Modality Router combina engines, enquanto o Perception Engine preserva origem, horário e confiança de cada observação. O botão de presença reúne voz, captura pontual de tela e câmera sob consentimento explícito, exibe indicadores ativos e oferece kill switch. Frames iguais são ignorados e frames brutos não entram automaticamente na memória. Image V2 possui presets `FAST/BALANCED/HIGH/MAX`, intenção visual, edição/variações/inpainting quando Forge suporta e histórico por proveniência. Video V2 possui storyboard e projeto estruturado, mas geração e compreensão temporal continuam indisponíveis sem provider local real. Web Speech permanece apenas fallback e não é apresentado como realtime voice completo.
+O V8 formaliza mensagens com texto, imagens, áudio, vídeo, documentos, frames de tela/câmera e metadata. O Modality Router combina engines, enquanto o Perception Engine preserva origem, horário e confiança de cada observação. O botão de presença reúne voz, captura pontual de tela e câmera sob consentimento explícito, exibe indicadores ativos e oferece kill switch. Frames iguais são ignorados e frames brutos não entram automaticamente na memória. Image V2 possui presets `FAST/BALANCED/HIGH/MAX`, intenção visual, edição/variações/inpainting quando Forge suporta e histórico por proveniência. Video V2 possui storyboard e projeto estruturado, mas geração e compreensão temporal continuam indisponíveis sem provider local real.
+
+O **Living Eye 3.0** conecta a presença visual a uma conversa contínua: reconhecimento parcial, endpoint por silêncio, envio automático da fala final, TTS iniciado por frases durante o streaming e barge-in que interrompe a voz e devolve a escuta. Mensagens faladas entram no mesmo chat persistente. A reação de saída ainda usa eventos reais de boundary do Web Speech, porque esse fallback não expõe PCM; portanto, o projeto não o apresenta como full duplex neural completo. A personalidade casual ganhou regras anti-template, e o workspace pessoal passou a interpretar o estado em linguagem natural. Artefatos HTML/SVG abrem em preview isolado com fonte, cópia e download.
 
 O V6 não salva toda conversa indiscriminadamente. O Memory Gate V2 avalia utilidade, novidade, estabilidade, confiança, escopo, sensibilidade e duplicação. “Lembre que…” cria memória explícita; “esqueça…” exclui a correspondência encontrada. A central **Memória do Nexo** permite pesquisar, editar, confirmar, arquivar e apagar registros. Contradições preservam as duas evidências ou marcam a anterior como `SUPERSEDED`; nunca são sobrescritas silenciosamente. RAG usa hash de conteúdo e chunks guiados por estrutura para não reindexar arquivos inalterados.
 
@@ -97,13 +99,14 @@ npm run eval:knowledge
 npm run eval:personal
 npm run eval:multimodal
 npm run eval:extensions
+npm run eval:coding-browser
 npm run eval:master
 npm run benchmark:memory
 npm run benchmark:v4
 npm run benchmark:v5
 ```
 
-`eval:intelligence` contém 200 casos de prontidão estrutural; ele não deve ser confundido com qualidade generativa. `eval:autonomy` executa 36 verificações de capacidade, incluindo um navegador Edge real com DOM, clique, console e screenshot. `eval:master` mantém golden tasks do control plane para routing, honestidade, segurança, linguagem e false-success; seu próprio relatório declara que não mede qualidade generativa. `eval:media` usa `SKIPPED` para providers realmente ausentes. `benchmark:v4` separa runtime, TTFT, total, cold/warm e modelo. O Router só usa um benchmark de qualidade persistido quando há pelo menos 10 amostras reais naquele domínio.
+`eval:intelligence` contém 200 casos de prontidão estrutural; ele não deve ser confundido com qualidade generativa. `eval:autonomy` executa 36 verificações de capacidade, incluindo um navegador Edge real com DOM, clique, console e screenshot. `eval:coding-browser` mantém 20 gates determinísticos para objetivo, inspeção, validação, plano integrado e contratos de navegador; ele não substitui uma futura taxa de resolução com 20 projetos quebrados e o modelo local real. `eval:master` mantém golden tasks do control plane para routing, honestidade, segurança, linguagem e false-success; seu próprio relatório declara que não mede qualidade generativa. `eval:media` usa `SKIPPED` para providers realmente ausentes. `benchmark:v4` separa runtime, TTFT, total, cold/warm e modelo. O Router só usa um benchmark de qualidade persistido quando há pelo menos 10 amostras reais naquele domínio.
 
 ## Skills e MCP
 
