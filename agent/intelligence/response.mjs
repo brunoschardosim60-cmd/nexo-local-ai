@@ -1,3 +1,20 @@
+export function normalizePortugueseOutput(content) {
+  return String(content || '')
+    .replace(/Como posso eu ajudar/gi, 'Como posso ajudar')
+    .replace(/Como posso ajudar você hoje\??/gi, 'O que está passando pela sua cabeça hoje?')
+    .replace(/Como posso assisti-lo hoje\??/gi, 'O que está passando pela sua cabeça hoje?')
+    .replace(/Posso respondo/gi, 'Posso responder')
+    .replace(/\bSou informações\b/gi, 'Tenho informações')
+    .replace(/\bSou capacidade\b/gi, 'Tenho capacidade')
+    .replace(/\bSou habilidade\b/gi, 'Tenho habilidade')
+    .replace(/aprendizado continuo/gi, 'aprendizado contínuo')
+    .replace(/conforme você me interage/gi, 'conforme interagimos')
+    .replace(/Como vai as coisas\?/gi, 'Como vão as coisas?')
+    .replace(/Se (?:você )?tiver mais alguma (?:pergunta|dúvida)[\s\S]*?sinta-se à vontade para perguntar!?/gi, 'Qual parte disso você gostaria de explorar primeiro?')
+    .replace(/[ \t]+\n/g, '\n')
+    .trim();
+}
+
 export function createResponseIntelligence({ personality }) {
   function plan({ question, complexity, context, epistemic }) {
     const technical = ['coding', 'technical', 'security', 'study'].includes(context);

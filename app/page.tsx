@@ -55,6 +55,7 @@ import {
 import Image from 'next/image';
 import { useNexoTaskSync } from '@/hooks/use-nexo-task-sync';
 import { NexoClient, NEXO_AGENT_URL } from '@/lib/nexo/client';
+import { BRAND_NAME } from '@/lib/nexo/brand';
 import {
   parseAgentTask,
   taskStatusLabel,
@@ -207,32 +208,6 @@ function formatDuration(milliseconds?: number) {
   if (milliseconds === undefined) return '';
   if (milliseconds < 1000) return `${Math.max(1, Math.round(milliseconds))} ms`;
   return `${(milliseconds / 1000).toLocaleString('pt-BR', { minimumFractionDigits: 1, maximumFractionDigits: 1 })} s`;
-}
-
-function polishPortuguese(content: string) {
-  return content
-    .replace(/Como posso eu ajudar/gi, 'Como posso ajudar')
-    .replace(
-      /Como posso ajudar você hoje\??/gi,
-      'O que está passando pela sua cabeça hoje?',
-    )
-    .replace(
-      /Como posso assisti-lo hoje\??/gi,
-      'O que está passando pela sua cabeça hoje?',
-    )
-    .replace(/Posso respondo/gi, 'Posso responder')
-    .replace(/\bSou informações\b/gi, 'Tenho informações')
-    .replace(/\bSou capacidade\b/gi, 'Tenho capacidade')
-    .replace(/\bSou habilidade\b/gi, 'Tenho habilidade')
-    .replace(/aprendizado continuo/gi, 'aprendizado contínuo')
-    .replace(/conforme você me interage/gi, 'conforme interagimos')
-    .replace(/Como vai as coisas\?/gi, 'Como vão as coisas?')
-    .replace(
-      /Se (?:você )?tiver mais alguma (?:pergunta|dúvida)[\s\S]*?sinta-se à vontade para perguntar!?/gi,
-      'Qual parte disso você gostaria de explorar primeiro?',
-    )
-    .replace(/[ \t]+\n/g, '\n')
-    .trim();
 }
 
 function isImageCreationRequest(question: string, history: ChatMessage[]) {
@@ -1600,7 +1575,6 @@ export default function Home() {
         throw new Error('O Runtime V4 não produziu uma resposta.');
       const kindV3: MessageKind =
         effectiveModeV3 === 'Planilhas' ? 'sheet' : 'text';
-      if (kindV3 === 'text') responseTextV3 = polishPortuguese(responseTextV3);
       const elapsedMsV3 = performance.now() - requestStarted;
       const completeChatV3 = {
         ...pendingChat,
@@ -1642,7 +1616,7 @@ export default function Home() {
       <div className="flex items-center gap-3 px-2 py-2">
         <NexoOrb className="size-10" />
         <div>
-          <p className="font-semibold tracking-[-.03em]">Nexo</p>
+          <p className="font-semibold tracking-[-.03em]">{BRAND_NAME}</p>
           <p className="text-[11px] text-muted-foreground">Seu espaço local</p>
         </div>
       </div>
@@ -1893,7 +1867,7 @@ export default function Home() {
                       O que vamos fazer?
                     </h1>
                     <p className="mx-auto mt-4 max-w-md text-sm leading-6 text-muted-foreground">
-                      Converse normalmente. Quando a tarefa pedir mais, o Nexo
+                      Converse normalmente. Quando a tarefa pedir mais, o {BRAND_NAME}
                       abre as ferramentas certas.
                     </p>
                   </div>

@@ -2,6 +2,7 @@ import { redactSecrets } from '../context/context-engine.mjs';
 import { compactHistory, routeIntent } from './intent-router.mjs';
 import { assessKnowledge, epistemicInstruction } from '../intelligence/epistemic.mjs';
 import { inferPersonalMode } from '../personal/modes.mjs';
+import { normalizePortugueseOutput } from '../intelligence/response.mjs';
 
 function words(value) {
   return new Set(String(value).normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().match(/[a-z0-9_$-]{3,}/g) || []);
@@ -141,7 +142,7 @@ export function createNexoRuntime({ config, memory, rag, ollama, research, loop,
       if (event.type === 'token') { content += event.content; yield event; }
       else if (event.type === 'metrics') metrics = event.metrics;
     }
-    content = content.trim(); if (!content) throw new Error('O modelo não produziu uma resposta.');
+    content = normalizePortugueseOutput(content); if (!content) throw new Error('O modelo não produziu uma resposta.');
     if (/\b(?:prefiro|gosto|sempre|nunca|meu nome|me chama|decidimos|padr[aã]o|procedimento)\b/i.test(prepared.question)) await memory.remember(`Usuário: ${prepared.question}\nNexo: ${content.slice(0, 2_000)}`, { kind: 'user', importance: 0.68, confidence: 0.7, source: 'USER_INFERRED', scope: prepared.memoryScope || 'global' });
     await eventBus?.publish('runtime.completed', { route: prepared.route, model: prepared.model, metrics, context: prepared.contextStats }, { source: 'nexo-runtime-v6' });
     yield { type: 'done', content, metrics, route: prepared.route, model: prepared.modelLabel, context: prepared.contextStats };

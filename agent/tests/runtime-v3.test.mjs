@@ -7,6 +7,7 @@ import { createDatabase } from '../memory/database.mjs';
 import { createPersonalityEngine } from '../personality/engine.mjs';
 import { compactHistory, routeIntent } from '../runtime/intent-router.mjs';
 import { createNexoRuntime } from '../runtime/nexo-runtime.mjs';
+import { normalizePortugueseOutput } from '../intelligence/response.mjs';
 
 test('Intent Router separa INSTANT, FAST, DEEP e AGENT', () => {
   const now = new Date('2026-08-30T03:42:00-03:00');
@@ -23,6 +24,10 @@ test('histórico é limitado por mensagens e caracteres', () => {
   assert.equal(compact.length <= 4, true);
   assert.equal(compact.reduce((total, item) => total + item.content.length, 0) <= 900, true);
   assert.match(compact.at(-1).content, /^m19-/);
+});
+
+test('normalização de português pertence ao Runtime e corrige erros conhecidos', () => {
+  assert.equal(normalizePortugueseOutput('Posso respondo. Sou capacidade para ajudar.'), 'Posso responder. Tenho capacidade para ajudar.');
 });
 
 test('Personality Engine aprende preferência explícita, aplica limite de segurança e pode ser apagado', async () => {

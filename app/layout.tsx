@@ -1,9 +1,10 @@
 import type { Metadata } from 'next';
+import { PRODUCT_BRAND } from '@/lib/nexo/brand';
 import './globals.css';
 
 export const metadata: Metadata = {
-  title: 'Nexo — Inteligência local',
-  description: 'Assistente local para conhecimento, programação, documentos e imagens.',
+  title: `${PRODUCT_BRAND.displayName} — ${PRODUCT_BRAND.tagline}`,
+  description: PRODUCT_BRAND.description,
 };
 
 export default function RootLayout({

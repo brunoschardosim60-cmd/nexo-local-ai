@@ -8,6 +8,7 @@ import {
   useRef,
   useState,
 } from 'react';
+import { BRAND_NAME, PRODUCT_BRAND } from '@/lib/nexo/brand';
 import { Maximize2, Mic, MicOff, Square, X } from 'lucide-react';
 import Image from 'next/image';
 import { cn } from '@/lib/utils';
@@ -339,7 +340,7 @@ export function NexoLivingEye({
         className,
       )}
       style={style}
-      aria-label={`Olho vivo do Nexo: ${STATE_LABELS[state]}`}
+      aria-label={`Olho vivo do ${BRAND_NAME}: ${STATE_LABELS[state]}`}
       onPointerMove={(event) => {
         if (mini) return;
         const rect = event.currentTarget.getBoundingClientRect();
@@ -351,7 +352,7 @@ export function NexoLivingEye({
       onPointerLeave={() => setGaze({ x: 0, y: 0 })}
     >
       <Image
-        src="/nexo/living-eye-base.png"
+            src={PRODUCT_BRAND.assets.livingEye}
         alt=""
         fill
         sizes={mini ? '30px' : '(max-width: 640px) 88vw, 544px'}
@@ -361,7 +362,7 @@ export function NexoLivingEye({
       />
       {!mini && (
         <Image
-          src="/nexo/living-eye-closed.png"
+            src={PRODUCT_BRAND.assets.livingEyeClosed}
           alt=""
           fill
           sizes="(max-width: 640px) 88vw, 544px"
