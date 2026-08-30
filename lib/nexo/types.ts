@@ -84,10 +84,20 @@ export type AgentHealth = {
       mcp?: { configured: number; connected: number; transport: string };
       background?: { active: number; total: number; running: boolean };
       events?: { persistent: boolean; subscribers: number };
+      memory?: { engine: string; records: number; memories: number; semantic: number; legacy: number; scopes: number; uncertain: number; hybridRetrieval: boolean; temporal: boolean; contradictions: boolean };
+      knowledge?: { engine: string; entities: number; relations: number; maxTraversalDepth: number };
+      continuity?: { engine: string; persistentHandoffs: boolean; projectAware: boolean };
       visualVerification?: boolean;
       vision?: Record<string, unknown>; image?: Record<string, unknown>; video?: Record<string, unknown>; audio?: Record<string, unknown>; mediaQueue?: Record<string, unknown>;
     };
   };
+};
+
+export type NexoMemory = {
+  id: string; type: string; kind: string; content: string; summary: string; scope: string;
+  privacy: 'LOCAL_ONLY' | 'SHAREABLE' | 'RESTRICTED'; status: 'ACTIVE' | 'UNCERTAIN' | 'SUPERSEDED' | 'FORGOTTEN' | 'DELETED';
+  confidence: number; importance: number; source: string; topics: string[]; entities: Array<{ type: string; name: string }>;
+  createdAt: string; updatedAt: string; observedAt: string; lastConfirmedAt?: string | null; supersededBy?: string | null;
 };
 
 export function parseAgentTask(content: string): AgentTask | null {

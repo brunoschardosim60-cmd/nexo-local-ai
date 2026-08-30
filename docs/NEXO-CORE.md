@@ -1,6 +1,6 @@
 # Nexo Core
 
-O Nexo é tratado como runtime local-first. O modelo não é o agente: ele é um componente usado pelo chat, planner, Critic e seletor de ferramentas. O Runtime V4 escolhe entre `INSTANT`, `FAST`, `DEEP` e `AGENT` antes de carregar contexto; o Model Router V2 seleciona o modelo pelo domínio, dificuldade, tools, visão e benchmarks locais.
+O Nexo é tratado como runtime local-first. O modelo não é o agente: ele é um componente usado pelo chat, planner, Critic e seletor de ferramentas. O Runtime V6 escolhe entre `INSTANT`, `FAST`, `DEEP`, `AGENT` e comandos determinísticos de memória antes de carregar contexto; o Model Router V2 seleciona o modelo pelo domínio, dificuldade, tools, visão e benchmarks locais.
 
 ## Fluxo
 
@@ -28,7 +28,8 @@ Cada run persiste objetivo, plano, nós, dependências, tentativas, observaçõe
 - O executor usa allowlist, `spawn` sem shell, ambiente mínimo e limites de tempo/saída. É uma barreira local, não isolamento de SO por VM/contêiner.
 - Git nativo atual é somente leitura: status, diff, log e show.
 - O verifier usa saídas reais das tools e critérios de aceitação, produzindo `PASS`, `FAIL` ou `UNCERTAIN`; alterações sem teste/build nunca recebem `PASS`.
-- Memória combina SQLite FTS, embeddings semânticos locais de 768 dimensões, reranking, importância, confiança, recência, uso e esquecimento controlado; o hash lexical permanece apenas como fallback de disponibilidade.
+- Memória combina SQLite FTS, embeddings semânticos locais, reranking, importância, confiança, recência, escopo, temporalidade, proveniência, contradições e esquecimento controlado; o hash lexical permanece apenas como fallback de disponibilidade.
+- O Knowledge Graph local mantém entidades e relações tipadas com proveniência; o Continuity Engine persiste handoffs de sessão/projeto.
 - RAG é marcado como conteúdo não confiável e separado das instruções do runtime.
 - Repository Intelligence indexa arquivos, imports, exports, símbolos, chamadas AST, rotas, scripts e relações sem ler segredos.
 - Pesquisa decompõe perguntas, consulta Wikipedia, OpenAlex e Stack Overflow em paralelo e devolve URLs, evidências, cobertura, datas e lacunas; acesso externo exige aprovação.
@@ -55,8 +56,8 @@ Cada run persiste objetivo, plano, nós, dependências, tentativas, observaçõe
 | 15. Repository map | Concluído |
 | 16. Symbol/code search | AST TypeScript/JavaScript, declarações, chamadas e referências concluídos; LSP e Tree-sitter multilíngue ainda não |
 | 17. Context Engine | V2 seletivo concluído: carrega somente memória, RAG, repositório, tools e eventos relevantes |
-| 18. RAG | Semântico local com `embeddinggemma`, reranking lexical e migração de vetores antigos |
-| 19. Memory Engine | Recuperação semântica, importância, confiança, recência, acesso, consolidação e personalidade adaptativa persistente concluídas |
+| 18. RAG | Semântico e incremental com `embeddinggemma`, hash de conteúdo, chunks estruturais, freshness e migração de vetores antigos |
+| 19. Memory Engine | Personal Memory V3: tipos, escopos, temporalidade, proveniência, gate, conflitos, consolidação, procedimentos, decisões, erros, grafo e continuidade |
 | 20. Model Router | V2.2 adaptativo, consciente de profiles, modelos carregados, recursos, domínio e benchmarks locais |
 | 21. Research Agent | Três fontes públicas, decomposição multi-query, matriz de evidências, datas, cobertura, lacunas e falhas parciais |
 | 22. Browser Agent | Base concluída com sessões, leitura segura, links observados e SSRF guard |
@@ -67,7 +68,7 @@ Cada run persiste objetivo, plano, nós, dependências, tentativas, observaçõe
 | 27. Visual verifier | Verificação estrutural e análise semântica local concluídas com `qwen2.5vl:3b` |
 | 28. Multi-agent | Delegação paralela de até quatro subtarefas concluída, com vínculo pai/filho e permissões próprias; isolamento em processos separados ainda não |
 | 29. Background/event architecture | Scheduler, jobs e event bus persistentes concluídos; webhooks ainda não |
-| 30. Evals e benchmarks | 33 testes automatizados, 13 critérios do runtime, 200 casos de prontidão, avaliação de mídia com `SKIPPED` honesto e benchmark cold/warm persistente |
+| 30. Evals e benchmarks | Suítes do agente + 10 testes V6, evals de memória longa, falsa memória, grafo e benchmark cold/warm com 2.000 registros |
 
 ## Matriz V4 de capacidade
 

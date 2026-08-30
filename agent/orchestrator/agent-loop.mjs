@@ -34,7 +34,7 @@ export function createAgentLoop({ config, database, registry, permissionManager,
     const assignedAgent = options.assignedAgent || specialistRegistry?.suggest?.(objective) || 'general';
     const goal = goalEngine?.create?.(objective, options) || { objective: objective.trim(), completionState: 'OPEN', acceptanceCriteria: [] };
     const budgets = { maxSteps: limits.maxSteps, maxRetries: limits.maxRetries, maxToolCalls: limits.maxToolCalls, maxModelCalls: limits.maxModelCalls, maxDurationMs: limits.maxDurationMs, maxCost: limits.maxCost };
-    let task = database.createTask({ objective: objective.trim(), ...limits, parentTaskId: options.parentTaskId || null, assignedAgent, goal, budgets, usage: { modelCalls: 0, toolCalls: 0, tokens: 0, cost: 0 }, workingMemory: { objective: objective.trim(), pending: [], evidence: [] } });
+    let task = database.createTask({ objective: objective.trim(), ...limits, parentTaskId: options.parentTaskId || null, assignedAgent, goal, budgets, usage: { modelCalls: 0, toolCalls: 0, tokens: 0, cost: 0 }, workingMemory: { objective: objective.trim(), memoryScope: options.memoryScope || `project:${options.scopes?.[0] || '.'}`, pending: [], evidence: [] } });
     controllers.set(task.id, new AbortController());
     if (capabilityManager) { const grant = capabilityManager.issue({ taskId: task.id, agent: assignedAgent, namespaces: specialist(assignedAgent).toolNamespaces, scopes: options.scopes || ['.'], ttlMs: limits.maxDurationMs }); task = database.updateTask(task.id, { capabilityId: grant.id }); }
     database.addEvent(task.id, 'run.started', 'Execução autônoma iniciada.', { runtime: 'nexo-core-v1' });
@@ -92,7 +92,7 @@ export function createAgentLoop({ config, database, registry, permissionManager,
     checkpointStore.capture(task.id, 'final', validation.validated ? 'Resultado verificado' : 'Resultado com alertas');
     await memory.remember(`Objetivo: ${task.objective}\nResultado: ${validation.summary}\nEvidências: ${validation.evidence.join('; ')}`, {
       kind: 'episodic', importance: validation.validated ? 0.78 : 0.55, confidence: validation.validated ? 0.9 : 0.55,
-      source: 'task-verifier', lastConfirmedAt: validation.validated ? completedAt : null, metadata: { taskId: task.id, validated: validation.validated },
+      source: 'TOOL', scope: task.workingMemory?.memoryScope || 'project:.', lastConfirmedAt: validation.validated ? completedAt : null, metadata: { taskId: task.id, validated: validation.validated, evidence: validation.evidence },
     });
     await logger.info('task.completed', { taskId: task.id, validated: validation.validated }); return snapshot(task.id);
   }

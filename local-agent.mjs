@@ -69,7 +69,14 @@ const server = createServer(async (request, response) => {
     verifySession(request);
     if (request.method === 'GET' && url.pathname === '/audit') return send(response, 200, { ok: true, entries: auditLog.slice(0, 30) });
     if (request.method === 'GET' && url.pathname === '/agent/tasks') return send(response, 200, { ok: true, tasks: core.loop.listTasks(Math.min(Number(url.searchParams.get('limit')) || 30, 100)) });
-    if (request.method === 'GET' && url.pathname === '/agent/memory/search') return send(response, 200, { ok: true, memories: await core.memory.search(url.searchParams.get('q') || '', { limit: Math.min(Number(url.searchParams.get('limit')) || 8, 30) }) });
+    if (request.method === 'GET' && url.pathname === '/agent/memory') return send(response, 200, { ok: true, memories: core.memory.list({ limit: Math.min(Number(url.searchParams.get('limit')) || 100, 500), scope: url.searchParams.get('scope') || null, kind: url.searchParams.get('kind') || null, status: (url.searchParams.get('status') || 'ACTIVE,UNCERTAIN').split(',') }) });
+    if (request.method === 'GET' && url.pathname === '/agent/memory/search') return send(response, 200, { ok: true, memories: await core.memory.search(url.searchParams.get('q') || '', { scope: url.searchParams.get('scope') || 'global', includeGlobal: url.searchParams.get('includeGlobal') !== 'false', limit: Math.min(Number(url.searchParams.get('limit')) || 8, 30) }) });
+    if (request.method === 'GET' && url.pathname === '/agent/memory/conflicts') return send(response, 200, { ok: true, conflicts: core.database.listMemoryConflicts(url.searchParams.get('status') || null, Math.min(Number(url.searchParams.get('limit')) || 100, 500)) });
+    if (request.method === 'GET' && url.pathname === '/agent/knowledge/entities') return send(response, 200, { ok: true, entities: core.knowledge.entities({ query: url.searchParams.get('q') || null, scope: url.searchParams.get('scope') || null, limit: Math.min(Number(url.searchParams.get('limit')) || 100, 500) }) });
+    if (request.method === 'GET' && url.pathname === '/agent/knowledge/relations') return send(response, 200, { ok: true, relations: core.knowledge.relations({ entityId: url.searchParams.get('entityId') || null, type: url.searchParams.get('type') || null, scope: url.searchParams.get('scope') || null, limit: Math.min(Number(url.searchParams.get('limit')) || 200, 1000) }) });
+    if (request.method === 'GET' && url.pathname === '/agent/continuity') return send(response, 200, { ok: true, continuity: await core.continuity.build({ sessionId: url.searchParams.get('sessionId') || 'main', scope: url.searchParams.get('scope') || 'global', objective: url.searchParams.get('q') || '' }) });
+    const memoryMatch = url.pathname.match(/^\/agent\/memory\/([^/]+)$/);
+    if (request.method === 'GET' && memoryMatch) { const item = core.database.getMemory(memoryMatch[1]); return item ? send(response, 200, { ok: true, memory: item, explanation: core.memory.explain(item.id) }) : send(response, 404, { error: 'Memória não encontrada.' }); }
     if (request.method === 'GET' && url.pathname === '/agent/rag/search') return send(response, 200, { ok: true, chunks: await core.rag.search(url.searchParams.get('q') || '', Math.min(Number(url.searchParams.get('limit')) || 8, 30)) });
     if (request.method === 'GET' && url.pathname === '/agent/repository/map') return send(response, 200, { ok: true, repository: await core.repository.build(url.searchParams.get('path') || '.') });
     if (request.method === 'GET' && url.pathname === '/agent/repository/symbols') return send(response, 200, { ok: true, symbols: await core.repository.findSymbol(url.searchParams.get('q') || '', url.searchParams.get('path') || '.') });
@@ -138,8 +145,16 @@ const server = createServer(async (request, response) => {
     const cancelMediaMatch = url.pathname.match(/^\/agent\/media\/jobs\/([^/]+)\/cancel$/);
     if (cancelMediaMatch) { const job = core.mediaQueue.cancel(cancelMediaMatch[1]); audit('media_cancel', job.id, true, job.kind); return send(response, 200, { ok: true, job }); }
     if (url.pathname === '/agent/memory') {
-      const id = await core.memory.remember(input.content, { kind: input.kind, importance: input.importance, confidence: input.confidence, source: input.source || 'user-session', metadata: input.metadata }); return send(response, 200, { ok: true, id });
+      const id = await core.memory.remember(input.content, { kind: input.kind, importance: input.importance, confidence: input.confidence, source: input.source || 'USER_EXPLICIT', explicit: input.explicit !== false, scope: input.scope || 'global', privacy: input.privacy || 'LOCAL_ONLY', metadata: input.metadata }); return send(response, 200, { ok: true, id });
     }
+    if (memoryMatch) {
+      if (input.action === 'update') { const memory = await core.memory.update(memoryMatch[1], input.patch || {}); return memory ? send(response, 200, { ok: true, memory }) : send(response, 404, { error: 'Memória não encontrada.' }); }
+      if (input.action === 'confirm') return send(response, 200, { ok: true, memory: core.memory.confirm(memoryMatch[1]) });
+      if (input.action === 'forget') return send(response, 200, { ok: true, memory: core.memory.forget(memoryMatch[1]) });
+      if (input.action === 'delete') { if (input.confirmation !== 'DELETE') throw new Error('Confirmação DELETE necessária.'); const deleted = core.memory.delete(memoryMatch[1]); audit('memory_delete', memoryMatch[1], deleted); return send(response, deleted ? 200 : 404, deleted ? { ok: true, deleted: true } : { error: 'Memória não encontrada.' }); }
+      throw new Error('Ação de memória inválida.');
+    }
+    if (url.pathname === '/agent/continuity') return send(response, 200, { ok: true, handoff: core.continuity.save(input) });
     if (url.pathname === '/agent/rag/index') {
       const indexed = await core.rag.indexFiles(Array.isArray(input.paths) ? input.paths : []); audit('rag_index', indexed.map(item => item.source).join(', '), true); return send(response, 200, { ok: true, indexed });
     }

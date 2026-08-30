@@ -12,7 +12,7 @@ O `Nexo Core` fica em `agent/`, separado da interface:
 - `orchestrator/`: Agent Loop, planejamento, execução, verifier, Critic, autocorreção com orçamento, retries e replanejamento.
 - `tools/`: contratos JSON validados, filesystem, patch com hash, Git, projetos e shell restrito.
 - `safety/`: `ALLOW`/`ASK`/`DENY`, capability tokens temporários, limites e executor de processos sem shell com allowlist. Ele reduz a superfície de ataque, mas não substitui isolamento de SO por contêiner ou VM.
-- `memory/`: SQLite, FTS, embeddings semânticos reais pelo `embeddinggemma`, reranking, importância, confiança, acesso e esquecimento controlado.
+- `memory/`: Personal Memory V3 em SQLite, FTS + embeddings locais pelo `embeddinggemma`, escopos global/projeto/sessão, proveniência, temporalidade, contradições auditáveis, esquecimento, continuidade e grafo de conhecimento.
 - `context/`: Context Engine V2 seletivo com orçamento, RAG semântico, proteção contra prompt injection, mapa de repositório e busca de símbolos.
 - `models/`: cliente Ollama e Model Router V2 por domínio, dificuldade, necessidade de tools e benchmarks do hardware local.
 - `multimodal/`, `vision/`, `image/`, `audio/` e `video/`: schema comum, visão local pelo Ollama, providers de mídia substituíveis e fallbacks explícitos.
@@ -30,11 +30,13 @@ No modo **Agente**, o Nexo devolve o controle da interface imediatamente, cria u
 
 Perguntas determinísticas não acionam modelo. Conversa simples usa o 3B com prompt mínimo; memória, RAG e pesquisa só entram quando a intenção exige. O Router escolhe automaticamente entre chat, código, raciocínio, pesquisa, documentos, dados e visão, respeitando uma seleção explícita de esforço alto. O verificador confronta objetivo, critérios e evidências e termina em `PASS`, `FAIL` ou `UNCERTAIN`; `FAIL` e `UNCERTAIN` acionam o Critic e até três estratégias diferentes antes da conclusão.
 
-O Core 5 registra as tools dinamicamente. A inteligência de código usa AST TypeScript/JavaScript, declarações, chamadas e referências; debugging mantém hipóteses e experimentos persistentes. A pesquisa pode decompor perguntas e construir uma matriz multi-fonte de evidências, cobertura, datas e lacunas. Wikipedia, OpenAlex e Stack Overflow não exigem chave paga; toda chamada externa continua dependendo de aprovação. O modelo `qwen2.5vl:3b` interpreta imagens localmente. Geração raster usa Stable Diffusion WebUI/Forge quando esse provider estiver instalado e ativo; se não estiver, a UI informa a indisponibilidade e não fabrica um SVG como resultado.
+O Core 6 registra as tools dinamicamente. A inteligência de código usa AST TypeScript/JavaScript, declarações, chamadas e referências; debugging mantém hipóteses e experimentos persistentes. A pesquisa pode decompor perguntas e construir uma matriz multi-fonte de evidências, cobertura, datas e lacunas. Wikipedia, OpenAlex e Stack Overflow não exigem chave paga; toda chamada externa continua dependendo de aprovação. O modelo `qwen2.5vl:3b` interpreta imagens localmente. Geração raster usa Stable Diffusion WebUI/Forge quando esse provider estiver instalado e ativo; se não estiver, a UI informa a indisponibilidade e não fabrica um SVG como resultado.
+
+O V6 não salva toda conversa indiscriminadamente. O Memory Gate V2 avalia utilidade, novidade, estabilidade, confiança, escopo, sensibilidade e duplicação. “Lembre que…” cria memória explícita; “esqueça…” exclui a correspondência encontrada. A central **Memória do Nexo** permite pesquisar, editar, confirmar, arquivar e apagar registros. Contradições preservam as duas evidências ou marcam a anterior como `SUPERSEDED`; nunca são sobrescritas silenciosamente. RAG usa hash de conteúdo e chunks guiados por estrutura para não reindexar arquivos inalterados.
 
 Quando o trabalho realmente pode ser dividido, `agents.delegate` cria de duas a quatro subtarefas vinculadas à tarefa principal. Elas são executadas em paralelo pelo runtime e cada especialista mantém seus próprios passos, limites, eventos, checkpoints e pedidos de permissão.
 
-Veja a arquitetura-base em [`docs/NEXO-CORE.md`](docs/NEXO-CORE.md) e a auditoria honesta da V5 em [`docs/NEXO-V5-REPORT.md`](docs/NEXO-V5-REPORT.md).
+Veja a arquitetura-base em [`docs/NEXO-CORE.md`](docs/NEXO-CORE.md), a auditoria da V5 em [`docs/NEXO-V5-REPORT.md`](docs/NEXO-V5-REPORT.md) e o relatório honesto do V6 em [`docs/NEXO-V6-REPORT.md`](docs/NEXO-V6-REPORT.md).
 
 ## Requisitos
 
@@ -70,6 +72,11 @@ npm run eval:agent
 npm run eval:intelligence
 npm run eval:media
 npm run eval:autonomy
+npm run eval:memory
+npm run eval:memory-long
+npm run eval:false-memory
+npm run eval:knowledge
+npm run benchmark:memory
 npm run benchmark:v4
 npm run benchmark:v5
 ```
@@ -84,6 +91,6 @@ Para MCP, copie `mcp-servers.example.json` para `data/mcp-servers.json` e config
 
 ## Privacidade
 
-O SQLite em `data/nexo.db` guarda localmente tarefas, planos, permissões, eventos, jobs, sessões de navegador, memória recuperável, skills e índices de documentos. O navegador mantém uma cópia de conveniência dos chats e preferências da interface. Os modelos são executados pelo Ollama localmente. Pesquisa, navegação e MCP só saem do computador após uma ação autorizada; nesses casos, a consulta ou requisição necessária é enviada à fonte escolhida.
+O SQLite em `data/nexo.db` guarda localmente tarefas, planos, permissões, eventos, jobs, sessões de navegador, memórias, conflitos, entidades, relações, handoffs, skills e índices de documentos. O navegador mantém uma cópia de conveniência dos chats e preferências da interface. Os modelos e embeddings são executados pelo Ollama localmente. Registros `RESTRICTED` não entram em pesquisa ou navegação externa. Pesquisa, navegação e MCP só saem do computador após uma ação autorizada; nesses casos, apenas a consulta ou requisição necessária é enviada à fonte escolhida.
 
 O banco, logs, sessões, backups e índices locais são ignorados pelo Git e não são enviados ao GitHub.

@@ -13,7 +13,7 @@ import { useNexoTaskSync } from '@/hooks/use-nexo-task-sync';
 import { NexoClient, NEXO_AGENT_URL } from '@/lib/nexo/client';
 import {
   parseAgentTask, taskStatusLabel, type AgentHealth, type AgentPermission, type AgentTask,
-  type Chat, type ChatMessage, type Effort, type LocalAttachment, type LocalDocument, type MediaArtifact, type MessageKind, type NexoAction, type UserProfile,
+  type Chat, type ChatMessage, type Effort, type LocalAttachment, type LocalDocument, type MediaArtifact, type MessageKind, type NexoAction, type NexoMemory, type UserProfile,
 } from '@/lib/nexo/types';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -262,6 +262,12 @@ export default function Home() {
   const [voiceOutput, setVoiceOutput] = useState(false);
   const [profileOpen, setProfileOpen] = useState(false);
   const [securityOpen, setSecurityOpen] = useState(false);
+  const [memoryOpen, setMemoryOpen] = useState(false);
+  const [memories, setMemories] = useState<NexoMemory[]>([]);
+  const [memoryQuery, setMemoryQuery] = useState('');
+  const [selectedMemoryId, setSelectedMemoryId] = useState('');
+  const [memoryDraft, setMemoryDraft] = useState('');
+  const [memoryLoading, setMemoryLoading] = useState(false);
   const [mobileOpen, setMobileOpen] = useState(false);
   const [theme, setTheme] = useState<'light' | 'dark'>('dark');
   const [profile, setProfile] = useState<UserProfile>(DEFAULT_PROFILE);
@@ -399,6 +405,29 @@ export default function Home() {
       await new NexoClient(agentToken).resetPersonality();
       setNotice('Adaptação aprendida apagada. A identidade-base do Nexo foi mantida.');
     } catch (error) { setNotice(error instanceof Error ? error.message : 'Não consegui apagar a adaptação.'); }
+  }
+
+  async function loadMemories(query = memoryQuery) {
+    if (!agentToken) { setNotice('O Nexo Runtime está offline.'); return; }
+    setMemoryLoading(true);
+    try {
+      const items = await new NexoClient(agentToken).listMemories({ query: query.trim() || undefined, limit: 100 });
+      setMemories(items); const selected = items.find(item => item.id === selectedMemoryId) || items[0];
+      setSelectedMemoryId(selected?.id || ''); setMemoryDraft(selected?.content || '');
+    } catch (error) { setNotice(error instanceof Error ? error.message : 'Não consegui abrir a memória.'); }
+    finally { setMemoryLoading(false); }
+  }
+
+  async function openMemoryCenter() { setMemoryOpen(true); setMobileOpen(false); await loadMemories(''); }
+  async function manageSelectedMemory(action: 'update' | 'confirm' | 'forget' | 'delete') {
+    if (!agentToken || !selectedMemoryId) return;
+    setMemoryLoading(true);
+    try {
+      await new NexoClient(agentToken).manageMemory(selectedMemoryId, action, action === 'update' ? { content: memoryDraft } : undefined);
+      setNotice(action === 'delete' ? 'Memória apagada definitivamente.' : action === 'forget' ? 'Memória arquivada.' : action === 'confirm' ? 'Memória confirmada.' : 'Memória atualizada.');
+      await loadMemories(memoryQuery);
+    } catch (error) { setNotice(error instanceof Error ? error.message : 'Não consegui alterar a memória.'); }
+    finally { setMemoryLoading(false); }
   }
 
   function toggleTheme() {
@@ -645,6 +674,7 @@ export default function Home() {
         <p className="mt-2 text-[11px] leading-5 text-muted-foreground">Chats e perfil ficam neste computador.</p>
       </div>
       <Button className="mt-2 justify-start" variant="ghost" onClick={() => { setSecurityOpen(true); setMobileOpen(false); }}><ShieldCheck /> Segurança e rede</Button>
+      <Button className="justify-start" variant="ghost" onClick={() => void openMemoryCenter()}><Library /> Memória do Nexo</Button>
       <Button className="justify-start" variant="ghost" onClick={() => { setProfileOpen(true); setMobileOpen(false); }}><Settings2 /> Meu perfil</Button>
     </div>
   );
@@ -748,7 +778,8 @@ export default function Home() {
           ].map(item => { const Icon = item.icon; return <div key={item.name} className="rounded-2xl border border-border bg-card/55 p-3.5"><div className="flex items-center gap-3"><div className="grid size-9 shrink-0 place-items-center rounded-xl bg-muted text-muted-foreground"><Icon className="size-4" /></div><div className="min-w-0 flex-1"><p className="text-xs font-medium">{item.name}</p><p className="mt-0.5 truncate text-[11px] text-muted-foreground">{item.detail}</p></div><span className={`size-2 shrink-0 rounded-full ${item.active ? 'bg-emerald-500' : 'bg-muted-foreground/25'}`} /></div></div>; })}</div>
           {!weather && <Button className="mt-3 w-full" size="sm" variant="outline" onClick={useDeviceLocation}><CloudSun /> Usar localização</Button>}
           <Button className="mt-3 w-full" size="sm" variant="outline" onClick={() => setSecurityOpen(true)}><ShieldCheck /> Abrir central de segurança</Button>
-          <div className="mt-6 rounded-2xl border border-primary/15 bg-primary/7 p-4"><p className="text-xs font-medium text-primary">Nexo Core {agentHealth?.agent?.version || 'local'}</p><div className="mt-3 grid grid-cols-2 gap-2 text-[11px] text-muted-foreground">{['Goal Engine', 'DAG persistente', 'Capability tokens', 'Cancelamento real', 'Project Workspace', 'AST TypeScript', 'Playwright real', 'Context Engine', 'Memória semântica', 'Research Agent', 'Skills + MCP', 'Artefatos rastreados', 'Multi-agent 4×', 'Visual verifier'].map(capability => <span key={capability} className="rounded-lg bg-muted px-2 py-1.5">{capability}</span>)}</div></div>
+          <Button className="mt-3 w-full" size="sm" variant="outline" onClick={() => void openMemoryCenter()}><Library /> Gerenciar memória</Button>
+          <div className="mt-6 rounded-2xl border border-primary/15 bg-primary/7 p-4"><p className="text-xs font-medium text-primary">Nexo Core {agentHealth?.agent?.version || 'local'}</p><div className="mt-3 grid grid-cols-2 gap-2 text-[11px] text-muted-foreground">{['Goal Engine', 'DAG persistente', 'Capability tokens', 'Cancelamento real', 'Project Workspace', 'AST TypeScript', 'Playwright real', 'Context Engine', 'Memória V3', 'Grafo local', 'Continuidade', 'RAG incremental', 'Research Agent', 'Skills + MCP', 'Multi-agent 4×', 'Visual verifier'].map(capability => <span key={capability} className="rounded-lg bg-muted px-2 py-1.5">{capability}</span>)}</div></div>
         </div></ScrollArea>
       </aside>
     </div>
@@ -769,6 +800,18 @@ export default function Home() {
         </div>
         <div className="rounded-xl border border-border bg-muted/30 p-3"><p className="text-xs font-medium">Personalidade adaptativa</p><p className="mt-1 text-[11px] leading-5 text-muted-foreground">O Nexo aprende gradualmente seu nível de formalidade, humor, iniciativa e tamanho preferido de resposta. Você pode apagar somente essa adaptação quando quiser.</p></div>
         <DialogFooter className="justify-between sm:justify-between"><Button variant="ghost" onClick={() => void resetAdaptivePersonality()}>Apagar adaptação</Button><Button onClick={saveProfile}>Salvar perfil</Button></DialogFooter>
+      </DialogContent>
+    </Dialog>
+
+    <Dialog open={memoryOpen} onOpenChange={setMemoryOpen}>
+      <DialogContent className="max-h-[calc(100dvh-2rem)] overflow-hidden border border-border bg-card sm:max-w-4xl">
+        <DialogHeader><DialogTitle className="flex items-center gap-2"><Library className="text-primary" /> Memória do Nexo</DialogTitle><DialogDescription>Pesquise, confira e controle o que o Nexo mantém no SQLite deste computador.</DialogDescription></DialogHeader>
+        <div className="flex gap-2"><Input value={memoryQuery} onChange={event => setMemoryQuery(event.target.value)} onKeyDown={event => { if (event.key === 'Enter') void loadMemories(); }} placeholder="Pesquisar pelo significado…" /><Button variant="outline" onClick={() => void loadMemories()} disabled={memoryLoading}><Search /> Buscar</Button></div>
+        <div className="grid min-h-0 gap-3 md:grid-cols-[minmax(0,1fr)_minmax(0,1.25fr)]">
+          <ScrollArea className="h-[360px] rounded-2xl border border-border"><div className="space-y-1 p-2">{memories.length === 0 ? <p className="p-4 text-xs text-muted-foreground">{memoryLoading ? 'Carregando…' : 'Nenhuma memória encontrada.'}</p> : memories.map(item => <button key={item.id} className={`w-full rounded-xl p-3 text-left transition ${item.id === selectedMemoryId ? 'bg-primary/10 ring-1 ring-primary/25' : 'hover:bg-muted'}`} onClick={() => { setSelectedMemoryId(item.id); setMemoryDraft(item.content); }}><div className="flex items-center justify-between gap-2"><Badge variant="outline" className="text-[9px]">{item.type}</Badge><span className={`text-[9px] ${item.status === 'UNCERTAIN' ? 'text-amber-500' : 'text-emerald-500'}`}>{item.status}</span></div><p className="mt-2 line-clamp-2 text-xs leading-5">{item.summary || item.content}</p><p className="mt-1 text-[10px] text-muted-foreground">{item.scope} · {Math.round(item.confidence * 100)}% · {item.source}</p></button>)}</div></ScrollArea>
+          {(() => { const item = memories.find(memory => memory.id === selectedMemoryId); return item ? <div className="flex h-[360px] min-h-0 flex-col rounded-2xl border border-border p-4"><div className="flex flex-wrap gap-1.5"><Badge>{item.type}</Badge><Badge variant="outline">{item.privacy}</Badge><Badge variant="outline">{item.scope}</Badge></div><Textarea className="mt-3 min-h-0 flex-1 resize-none" value={memoryDraft} onChange={event => setMemoryDraft(event.target.value)} /><p className="mt-2 text-[10px] text-muted-foreground">Observado em {new Date(item.observedAt).toLocaleString('pt-BR')} · confiança {Math.round(item.confidence * 100)}%</p><div className="mt-3 flex flex-wrap gap-2"><Button size="sm" onClick={() => void manageSelectedMemory('update')} disabled={memoryLoading}><FilePenLine /> Salvar</Button>{item.status === 'UNCERTAIN' && <Button size="sm" variant="outline" onClick={() => void manageSelectedMemory('confirm')} disabled={memoryLoading}><Check /> Confirmar</Button>}<Button size="sm" variant="outline" onClick={() => void manageSelectedMemory('forget')} disabled={memoryLoading}>Arquivar</Button><Button size="sm" variant="destructive" onClick={() => void manageSelectedMemory('delete')} disabled={memoryLoading}><Trash2 /> Apagar</Button></div></div> : <div className="grid h-[360px] place-items-center rounded-2xl border border-dashed border-border text-xs text-muted-foreground">Selecione uma memória.</div>; })()}
+        </div>
+        <p className="text-[10px] leading-4 text-muted-foreground">Memórias restritas nunca são enviadas a serviços externos. “Apagar” remove o registro; “Arquivar” o preserva fora da recuperação normal.</p>
       </DialogContent>
     </Dialog>
 

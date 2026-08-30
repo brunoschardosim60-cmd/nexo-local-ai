@@ -45,12 +45,25 @@ export function createNexoRuntime({ config, memory, rag, ollama, research, loop,
     const mode = String(input.mode || 'Geral'); const effort = String(input.effort || 'Médio');
     const documents = Array.isArray(input.documents) ? input.documents.slice(0, 8) : [];
     const profile = input.profile && typeof input.profile === 'object' ? input.profile : {};
+    const memoryScope = String(input.projectScope || input.memoryScope || 'global').slice(0, 300);
     const weather = input.weather && typeof input.weather === 'object' ? input.weather : null;
+    const rememberMatch = question.match(/^(?:nexo[, ]+)?(?:lembre(?:-se)?|memorize|guarde)(?:\s+(?:que|disso|isto))?\s*[:,-]?\s*(.+)$/i);
+    if (rememberMatch?.[1]?.trim()) {
+      const id = await memory.remember(rememberMatch[1].trim(), { kind: 'user', importance: 0.9, confidence: 0.96, source: 'USER_EXPLICIT', explicit: true, scope: memoryScope, privacy: 'LOCAL_ONLY' });
+      return { kind: 'instant', route: 'memory', content: id ? 'Lembrei disso e salvei localmente.' : 'Não salvei porque o conteúdo parece temporário ou sensível demais.', model: 'Nexo Memory', memoryId: id, epistemic: assessKnowledge({ direct: true }) };
+    }
+    const forgetMatch = question.match(/^(?:nexo[, ]+)?(?:esque[cç]a|apague da mem[oó]ria|n[aã]o lembre mais)(?:\s+(?:que|disso|isto))?\s*[:,-]?\s*(.+)$/i);
+    if (forgetMatch?.[1]?.trim()) {
+      const matches = await memory.search(forgetMatch[1].trim(), { scope: memoryScope, includeGlobal: true, limit: 3, queryExpansion: false });
+      if (!matches.length || matches[0].score < 0.28) return { kind: 'instant', route: 'memory', content: 'Não encontrei uma memória correspondente. Não apaguei nada.', model: 'Nexo Memory', epistemic: assessKnowledge({ direct: true }) };
+      memory.delete(matches[0].id);
+      return { kind: 'instant', route: 'memory', content: 'Apaguei essa memória local de forma definitiva.', model: 'Nexo Memory', deletedMemoryId: matches[0].id, epistemic: assessKnowledge({ direct: true }) };
+    }
     const decision = routeIntent({ question, mode, effort, hasDocuments: documents.length > 0, webSearch: Boolean(input.webSearch), weather });
     const complexity = estimator?.estimate?.({ question, mode, attachments: input.attachments, webSearch: input.webSearch }) || null;
-    if (decision.route === 'instant') { queueMicrotask(() => void eventBus?.publish('runtime.routed', { route: decision.route, context: decision.context, reason: decision.reason }, { source: 'nexo-runtime-v5' })); return { kind: 'instant', route: 'instant', content: decision.answer, model: 'Determinístico', context: decision.context, complexity, epistemic: assessKnowledge({ direct: true }) }; }
+    if (decision.route === 'instant') { queueMicrotask(() => void eventBus?.publish('runtime.routed', { route: decision.route, context: decision.context, reason: decision.reason }, { source: 'nexo-runtime-v6' })); return { kind: 'instant', route: 'instant', content: decision.answer, model: 'Determinístico', context: decision.context, complexity, epistemic: assessKnowledge({ direct: true }) }; }
     personality.observe(question, decision.context);
-    await eventBus?.publish('runtime.routed', { route: decision.route, context: decision.context, reason: decision.reason }, { source: 'nexo-runtime-v5' });
+    await eventBus?.publish('runtime.routed', { route: decision.route, context: decision.context, reason: decision.reason }, { source: 'nexo-runtime-v6' });
     if (decision.route === 'agent') {
       const effortBudgets = { Baixo: { maxSteps: 8, maxToolCalls: 14, maxModelCalls: 12 }, Médio: { maxSteps: 16, maxToolCalls: 30, maxModelCalls: 24 }, Alto: { maxSteps: 32, maxToolCalls: 64, maxModelCalls: 50 }, 'Extra alto': { maxSteps: 50, maxToolCalls: 100, maxModelCalls: 78 } };
       const task = loop.enqueueTask(question, { ...(effortBudgets[effort] || effortBudgets.Médio), maxRetries: effort === 'Baixo' ? 1 : 2 });
@@ -59,7 +72,7 @@ export function createNexoRuntime({ config, memory, rag, ollama, research, loop,
 
     const cacheHits = []; const contextParts = [];
     if (decision.needs.memory) {
-      const found = await cache.get(`memory:${question}`, 20_000, () => memory.search(question, { limit: decision.route === 'fast' ? 2 : 5 }));
+      const found = await cache.get(`memory:${memoryScope}:${question}`, 20_000, () => memory.search(question, { scope: memoryScope, includeGlobal: true, limit: decision.route === 'fast' ? 2 : 5 }));
       cacheHits.push({ source: 'memory', cached: found.cached });
       if (found.value.length) contextParts.push(`MEMÓRIA LOCAL RELEVANTE:\n${found.value.map(item => `- ${item.content.slice(0, 900)}`).join('\n')}`);
     }
@@ -93,7 +106,7 @@ export function createNexoRuntime({ config, memory, rag, ollama, research, loop,
     const predict = decision.route === 'fast' ? question.length < 100 ? 180 : 360 : effort === 'Extra alto' ? 1_500 : effort === 'Alto' ? 1_000 : 700;
     const messages = [{ role: 'system', content: `${coreSystem}\n${personal}` }, ...history, ...(contextText ? [{ role: 'system', content: contextText }] : []), { role: 'user', content: question }];
     return {
-      kind: 'model', route: decision.route, context: decision.context, reason: decision.reason, question, mode, effort, profile,
+      kind: 'model', route: decision.route, context: decision.context, reason: decision.reason, question, mode, effort, profile, memoryScope,
       model: selectedModel, modelLabel: `${decision.route === 'fast' ? 'Nexo Fast' : 'Nexo Deep'} · ${selectedModel.includes(':3b') ? 'Qwen 3B' : selectedModel.includes(':7b') ? 'Qwen 7B' : selectedModel}`,
       messages, options: { temperature: mode === 'Imagens' || mode === 'Planilhas' ? 0.16 : decision.route === 'fast' ? 0.3 : 0.24, numPredict: predict, numContext: decision.route === 'fast' ? 2_048 : effort === 'Extra alto' ? 6_144 : 4_096, stop: decision.reason === 'presença-casual' ? ['Como posso', 'O que posso', 'E você'] : [] },
       complexity, epistemic, answerPlan: responseLayer?.plan || null,
@@ -110,8 +123,8 @@ export function createNexoRuntime({ config, memory, rag, ollama, research, loop,
       else if (event.type === 'metrics') metrics = event.metrics;
     }
     content = content.trim(); if (!content) throw new Error('O modelo não produziu uma resposta.');
-    if (prepared.question.length + content.length >= 120) await memory.remember(`Usuário: ${prepared.question}\nNexo: ${content.slice(0, 4_000)}`, { kind: /\b(?:prefiro|gosto|sempre|nunca|lembre)\b/i.test(prepared.question) ? 'user' : 'episodic', importance: 0.58, confidence: 0.68, source: 'runtime-v4' });
-    await eventBus?.publish('runtime.completed', { route: prepared.route, model: prepared.model, metrics, context: prepared.contextStats }, { source: 'nexo-runtime-v5' });
+    if (/\b(?:prefiro|gosto|sempre|nunca|meu nome|me chama|decidimos|padr[aã]o|procedimento)\b/i.test(prepared.question)) await memory.remember(`Usuário: ${prepared.question}\nNexo: ${content.slice(0, 2_000)}`, { kind: 'user', importance: 0.68, confidence: 0.7, source: 'USER_INFERRED', scope: prepared.memoryScope || 'global' });
+    await eventBus?.publish('runtime.completed', { route: prepared.route, model: prepared.model, metrics, context: prepared.contextStats }, { source: 'nexo-runtime-v6' });
     yield { type: 'done', content, metrics, route: prepared.route, model: prepared.modelLabel, context: prepared.contextStats };
   }
 
@@ -121,7 +134,7 @@ export function createNexoRuntime({ config, memory, rag, ollama, research, loop,
       const capable = ['Alto', 'Extra alto'].includes(effort);
       return ollama.warm(capable ? config.capableModel : config.fastModel, capable ? effort === 'Extra alto' ? 6_144 : 4_096 : 2_048);
     },
-    health() { return { version: '5.0.0', routes: ['instant', 'fast', 'deep', 'agent'], progressiveContext: true, adaptiveModelRouting: Boolean(router), complexityEstimator: Boolean(estimator), responseIntelligence: Boolean(responseIntelligence), epistemicStates: ['KNOWN', 'INFERRED', 'RETRIEVED', 'UNCERTAIN', 'UNKNOWN'], streaming: true, autonomousBudgets: true, cacheEntries: cache.size(), personality: personality.health() }; },
+    health() { return { version: '6.0.0', routes: ['instant', 'fast', 'deep', 'agent', 'memory'], progressiveContext: true, adaptiveModelRouting: Boolean(router), complexityEstimator: Boolean(estimator), responseIntelligence: Boolean(responseIntelligence), epistemicStates: ['KNOWN', 'INFERRED', 'RETRIEVED', 'UNCERTAIN', 'UNKNOWN'], streaming: true, autonomousBudgets: true, explicitMemoryCommands: true, cacheEntries: cache.size(), personality: personality.health() }; },
     clearCache() { cache.clear(); },
   };
 }

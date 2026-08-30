@@ -148,6 +148,41 @@ export function createDatabase(dataDir) {
       id TEXT PRIMARY KEY, root TEXT NOT NULL UNIQUE, name TEXT NOT NULL, state_json TEXT NOT NULL DEFAULT '{}',
       instructions_json TEXT NOT NULL DEFAULT '{}', created_at TEXT NOT NULL, updated_at TEXT NOT NULL
     )`,
+    `CREATE TABLE IF NOT EXISTS memory_conflicts (
+      id TEXT PRIMARY KEY, old_memory_id TEXT, new_memory_id TEXT, resolution TEXT NOT NULL,
+      status TEXT NOT NULL DEFAULT 'OPEN', reason TEXT NOT NULL, evidence_json TEXT NOT NULL DEFAULT '[]',
+      created_at TEXT NOT NULL, resolved_at TEXT,
+      FOREIGN KEY(old_memory_id) REFERENCES memories(id) ON DELETE SET NULL,
+      FOREIGN KEY(new_memory_id) REFERENCES memories(id) ON DELETE SET NULL
+    )`,
+    `CREATE TABLE IF NOT EXISTS knowledge_entities (
+      id TEXT PRIMARY KEY, type TEXT NOT NULL, name TEXT NOT NULL, normalized TEXT NOT NULL,
+      scope TEXT NOT NULL DEFAULT 'global', metadata_json TEXT NOT NULL DEFAULT '{}',
+      created_at TEXT NOT NULL, updated_at TEXT NOT NULL,
+      UNIQUE(type, normalized, scope)
+    )`,
+    `CREATE TABLE IF NOT EXISTS knowledge_relations (
+      id TEXT PRIMARY KEY, from_entity_id TEXT NOT NULL, to_entity_id TEXT NOT NULL, type TEXT NOT NULL,
+      confidence REAL NOT NULL DEFAULT 0.7, source_memory_id TEXT, status TEXT NOT NULL DEFAULT 'ACTIVE',
+      metadata_json TEXT NOT NULL DEFAULT '{}', created_at TEXT NOT NULL, updated_at TEXT NOT NULL,
+      UNIQUE(from_entity_id, to_entity_id, type, source_memory_id),
+      FOREIGN KEY(from_entity_id) REFERENCES knowledge_entities(id) ON DELETE CASCADE,
+      FOREIGN KEY(to_entity_id) REFERENCES knowledge_entities(id) ON DELETE CASCADE,
+      FOREIGN KEY(source_memory_id) REFERENCES memories(id) ON DELETE SET NULL
+    )`,
+    `CREATE TABLE IF NOT EXISTS document_sources (
+      source TEXT PRIMARY KEY, content_hash TEXT NOT NULL, mtime_ms REAL, size INTEGER,
+      source_version TEXT, embedding_model TEXT NOT NULL, last_verified_at TEXT NOT NULL,
+      indexed_at TEXT NOT NULL, metadata_json TEXT NOT NULL DEFAULT '{}'
+    )`,
+    `CREATE TABLE IF NOT EXISTS session_handoffs (
+      id TEXT PRIMARY KEY, session_id TEXT NOT NULL, scope TEXT NOT NULL DEFAULT 'global',
+      state_json TEXT NOT NULL, created_at TEXT NOT NULL, updated_at TEXT NOT NULL
+    )`,
+    `CREATE TABLE IF NOT EXISTS embedding_spaces (
+      model TEXT PRIMARY KEY, dimensions INTEGER NOT NULL, version TEXT NOT NULL,
+      compatible INTEGER NOT NULL DEFAULT 1, updated_at TEXT NOT NULL
+    )`,
     `CREATE VIRTUAL TABLE IF NOT EXISTS memories_fts USING fts5(
       id UNINDEXED, kind UNINDEXED, content, tokenize='unicode61 remove_diacritics 2'
     )`,
@@ -166,6 +201,11 @@ export function createDatabase(dataDir) {
     "CREATE INDEX IF NOT EXISTS idx_background_jobs_due ON background_jobs(status, next_run_at) WHERE status = 'active'",
     'CREATE INDEX IF NOT EXISTS idx_browser_sessions_updated ON browser_sessions(updated_at DESC)',
     'CREATE INDEX IF NOT EXISTS idx_personality_observations_trait_created ON personality_observations(trait, created_at DESC)',
+    'CREATE INDEX IF NOT EXISTS idx_memory_conflicts_status_created ON memory_conflicts(status, created_at DESC)',
+    'CREATE INDEX IF NOT EXISTS idx_entities_scope_name ON knowledge_entities(scope, normalized)',
+    'CREATE INDEX IF NOT EXISTS idx_relations_from_type ON knowledge_relations(from_entity_id, type, status)',
+    'CREATE INDEX IF NOT EXISTS idx_relations_to_type ON knowledge_relations(to_entity_id, type, status)',
+    'CREATE INDEX IF NOT EXISTS idx_handoffs_session_updated ON session_handoffs(session_id, updated_at DESC)',
   ];
   for (const statement of statements) db.prepare(statement).run();
   const memoryColumns = new Set(db.prepare('PRAGMA table_info(memories)').all().map(column => column.name));
@@ -177,6 +217,17 @@ export function createDatabase(dataDir) {
   if (!memoryColumns.has('forgotten_at')) db.prepare('ALTER TABLE memories ADD COLUMN forgotten_at TEXT').run();
   if (!memoryColumns.has('reinforcement_count')) db.prepare('ALTER TABLE memories ADD COLUMN reinforcement_count INTEGER NOT NULL DEFAULT 0').run();
   if (!memoryColumns.has('contradiction_count')) db.prepare('ALTER TABLE memories ADD COLUMN contradiction_count INTEGER NOT NULL DEFAULT 0').run();
+  const memoryV3Columns = [
+    ['summary', "TEXT NOT NULL DEFAULT ''"], ['entities_json', "TEXT NOT NULL DEFAULT '[]'"],
+    ['topics_json', "TEXT NOT NULL DEFAULT '[]'"], ['scope', "TEXT NOT NULL DEFAULT 'global'"],
+    ['privacy', "TEXT NOT NULL DEFAULT 'LOCAL_ONLY'"], ['status', "TEXT NOT NULL DEFAULT 'ACTIVE'"],
+    ['updated_at', 'TEXT'], ['expires_at', 'TEXT'], ['valid_from', 'TEXT'], ['valid_until', 'TEXT'],
+    ['observed_at', 'TEXT'], ['superseded_by', 'TEXT'],
+  ];
+  for (const [name, definition] of memoryV3Columns) if (!memoryColumns.has(name)) db.prepare(`ALTER TABLE memories ADD COLUMN ${name} ${definition}`).run();
+  db.prepare("UPDATE memories SET updated_at = COALESCE(updated_at, created_at), observed_at = COALESCE(observed_at, created_at), status = CASE WHEN forgotten_at IS NOT NULL THEN 'FORGOTTEN' ELSE COALESCE(status, 'ACTIVE') END").run();
+  db.prepare('CREATE INDEX IF NOT EXISTS idx_memories_scope_status_kind ON memories(scope, status, kind, last_accessed_at DESC)').run();
+  db.prepare("CREATE INDEX IF NOT EXISTS idx_memories_active_importance ON memories(importance DESC, confidence DESC) WHERE status = 'ACTIVE'").run();
   const documentColumns = new Set(db.prepare('PRAGMA table_info(document_chunks)').all().map(column => column.name));
   if (!documentColumns.has('vector_model')) db.prepare("ALTER TABLE document_chunks ADD COLUMN vector_model TEXT NOT NULL DEFAULT 'lexical-hash-v1'").run();
   const taskColumns = new Set(db.prepare('PRAGMA table_info(tasks)').all().map(column => column.name));
@@ -274,28 +325,98 @@ export function createDatabase(dataDir) {
     return { id: row.id, taskId: row.task_id, tool: row.tool, scope: row.scope, risk: row.risk, status: row.status, reason: row.reason, input: json(row.input_json, {}), createdAt: row.created_at, resolvedAt: row.resolved_at };
   }
   function getPermissions(taskId) { return db.prepare('SELECT id FROM permissions WHERE task_id = ? ORDER BY created_at ASC').all(taskId).map(row => getPermission(row.id)); }
+  function hydrateMemory(row) { return row ? ({
+    id: row.id, type: row.kind, kind: row.kind, content: row.content, summary: row.summary || '',
+    vector: json(row.vector_json, []), embedding: json(row.vector_json, []), vectorModel: row.vector_model,
+    entities: json(row.entities_json, []), topics: json(row.topics_json, []), metadata: json(row.metadata_json, {}),
+    scope: row.scope || 'global', privacy: row.privacy || 'LOCAL_ONLY', status: row.status || 'ACTIVE',
+    importance: row.importance, confidence: row.confidence, source: row.source,
+    accessCount: row.access_count, reinforcementCount: row.reinforcement_count, contradictionCount: row.contradiction_count,
+    createdAt: row.created_at, updatedAt: row.updated_at || row.created_at, lastAccessedAt: row.last_accessed_at,
+    lastConfirmedAt: row.last_confirmed_at, observedAt: row.observed_at || row.created_at,
+    validFrom: row.valid_from, validUntil: row.valid_until, expiresAt: row.expires_at,
+    supersededBy: row.superseded_by, forgottenAt: row.forgotten_at,
+  }) : null; }
+  function getMemory(id) { return hydrateMemory(db.prepare('SELECT * FROM memories WHERE id = ?').get(id)); }
   function putMemory(memory) {
-    const id = randomUUID(); const now = new Date().toISOString();
-    db.prepare('INSERT INTO memories (id, kind, content, vector_json, vector_model, metadata_json, importance, confidence, source, created_at, last_accessed_at, last_confirmed_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)')
-      .run(id, memory.kind, memory.content, JSON.stringify(memory.vector), memory.vectorModel || 'lexical-hash-v1', JSON.stringify(memory.metadata || {}), memory.importance ?? 0.5, memory.confidence ?? 0.7, memory.source || 'agent', now, now, memory.lastConfirmedAt || null);
-    db.prepare('INSERT INTO memories_fts (id, kind, content) VALUES (?, ?, ?)').run(id, memory.kind, memory.content);
+    const id = memory.id || randomUUID(); const now = new Date().toISOString();
+    db.prepare(`INSERT INTO memories (
+      id, kind, content, summary, vector_json, vector_model, entities_json, topics_json, metadata_json,
+      scope, privacy, status, importance, confidence, source, created_at, updated_at, last_accessed_at,
+      last_confirmed_at, observed_at, valid_from, valid_until, expires_at, superseded_by
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+      .run(id, memory.type || memory.kind, memory.content, memory.summary || '', JSON.stringify(memory.embedding || memory.vector || []), memory.vectorModel || 'lexical-hash-v1',
+        JSON.stringify(memory.entities || []), JSON.stringify(memory.topics || []), JSON.stringify(memory.metadata || {}), memory.scope || 'global',
+        memory.privacy || 'LOCAL_ONLY', memory.status || 'ACTIVE', memory.importance ?? 0.5, memory.confidence ?? 0.7,
+        memory.source || 'AGENT', memory.createdAt || now, now, now, memory.lastConfirmedAt || null, memory.observedAt || now,
+        memory.validFrom || null, memory.validUntil || null, memory.expiresAt || null, memory.supersededBy || null);
+    db.prepare('INSERT INTO memories_fts (id, kind, content) VALUES (?, ?, ?)').run(id, memory.type || memory.kind, `${memory.summary || ''} ${memory.content}`.trim());
     return id;
   }
-  function listMemories(limit = 500) { return db.prepare('SELECT * FROM memories WHERE forgotten_at IS NULL ORDER BY importance DESC, last_accessed_at DESC LIMIT ?').all(limit).map(row => ({ id: row.id, kind: row.kind, content: row.content, vector: json(row.vector_json, []), vectorModel: row.vector_model, metadata: json(row.metadata_json, {}), importance: row.importance, confidence: row.confidence, source: row.source, accessCount: row.access_count, reinforcementCount: row.reinforcement_count, contradictionCount: row.contradiction_count, createdAt: row.created_at, lastAccessedAt: row.last_accessed_at, lastConfirmedAt: row.last_confirmed_at, forgottenAt: row.forgotten_at })); }
+  function listMemories(options = 500) {
+    if (typeof options === 'number') options = { limit: options };
+    const { limit = 500, scope = null, kind = null, status = ['ACTIVE', 'UNCERTAIN'], includeExpired = false } = options || {};
+    const clauses = []; const parameters = [];
+    if (scope) { clauses.push('scope = ?'); parameters.push(scope); }
+    if (kind) { clauses.push('kind = ?'); parameters.push(kind); }
+    if (status?.length) { clauses.push(`status IN (${status.map(() => '?').join(',')})`); parameters.push(...status); }
+    if (!includeExpired) { clauses.push('(expires_at IS NULL OR expires_at > ?)'); parameters.push(new Date().toISOString()); }
+    const where = clauses.length ? `WHERE ${clauses.join(' AND ')}` : '';
+    parameters.push(Math.max(1, Math.min(Number(limit) || 500, 10_000)));
+    return db.prepare(`SELECT * FROM memories ${where} ORDER BY importance DESC, confidence DESC, last_accessed_at DESC LIMIT ?`).all(...parameters).map(hydrateMemory);
+  }
   function touchMemory(id) { db.prepare('UPDATE memories SET last_accessed_at = ?, access_count = access_count + 1 WHERE id = ?').run(new Date().toISOString(), id); }
-  function updateMemoryVector(id, vector, vectorModel) { db.prepare('UPDATE memories SET vector_json = ?, vector_model = ? WHERE id = ?').run(JSON.stringify(vector), vectorModel, id); }
+  function updateMemoryVector(id, vector, vectorModel) { db.prepare('UPDATE memories SET vector_json = ?, vector_model = ?, updated_at = ? WHERE id = ?').run(JSON.stringify(vector), vectorModel, new Date().toISOString(), id); }
+  function updateMemory(id, patch = {}) {
+    const current = getMemory(id); if (!current) return null;
+    const next = { ...current, ...patch, metadata: { ...current.metadata, ...patch.metadata }, updatedAt: new Date().toISOString() };
+    db.prepare(`UPDATE memories SET kind=?, content=?, summary=?, entities_json=?, topics_json=?, metadata_json=?, scope=?, privacy=?, status=?,
+      importance=?, confidence=?, source=?, updated_at=?, last_confirmed_at=?, observed_at=?, valid_from=?, valid_until=?, expires_at=?, superseded_by=? WHERE id=?`)
+      .run(next.type || next.kind, next.content, next.summary || '', JSON.stringify(next.entities || []), JSON.stringify(next.topics || []), JSON.stringify(next.metadata || {}),
+        next.scope, next.privacy, next.status, next.importance, next.confidence, next.source, next.updatedAt, next.lastConfirmedAt || null,
+        next.observedAt || next.createdAt, next.validFrom || null, next.validUntil || null, next.expiresAt || null, next.supersededBy || null, id);
+    if (patch.content != null || patch.summary != null || patch.kind != null || patch.type != null) {
+      db.prepare('DELETE FROM memories_fts WHERE id = ?').run(id);
+      db.prepare('INSERT INTO memories_fts (id, kind, content) VALUES (?, ?, ?)').run(id, next.type || next.kind, `${next.summary || ''} ${next.content}`.trim());
+    }
+    return getMemory(id);
+  }
+  function setMemoryStatus(id, status, { supersededBy = null } = {}) {
+    if (!['ACTIVE', 'UNCERTAIN', 'SUPERSEDED', 'FORGOTTEN', 'DELETED'].includes(status)) throw new Error('Status de memória inválido.');
+    const now = new Date().toISOString();
+    db.prepare('UPDATE memories SET status=?, superseded_by=COALESCE(?, superseded_by), forgotten_at=CASE WHEN ? = \'FORGOTTEN\' THEN ? ELSE forgotten_at END, updated_at=? WHERE id=?').run(status, supersededBy, status, now, now, id);
+    return getMemory(id);
+  }
+  function deleteMemory(id) {
+    const current = getMemory(id); if (!current) return false;
+    db.prepare('DELETE FROM memories_fts WHERE id = ?').run(id);
+    db.prepare('DELETE FROM memories WHERE id = ?').run(id);
+    return true;
+  }
   function reinforceMemory(id, { importance = 0.5, confidence = 0.7, confirmedAt = null } = {}) {
     db.prepare('UPDATE memories SET reinforcement_count = reinforcement_count + 1, importance = MIN(1, MAX(importance, ?)), confidence = MIN(0.99, MAX(confidence, ?)), last_confirmed_at = COALESCE(?, last_confirmed_at), last_accessed_at = ? WHERE id = ?').run(importance, confidence, confirmedAt, new Date().toISOString(), id);
-    return listMemories(2000).find(item => item.id === id) || null;
+    return getMemory(id);
   }
-  function contradictMemory(id) { db.prepare('UPDATE memories SET contradiction_count = contradiction_count + 1, confidence = MAX(0.1, confidence - 0.18) WHERE id = ?').run(id); }
+  function contradictMemory(id) { db.prepare('UPDATE memories SET contradiction_count = contradiction_count + 1, confidence = MAX(0.1, confidence - 0.18), updated_at = ? WHERE id = ?').run(new Date().toISOString(), id); }
   function forgetMemories(cutoffIso, maxImportance = 0.25, maxConfidence = 0.45) {
-    return Number(db.prepare('UPDATE memories SET forgotten_at = ? WHERE forgotten_at IS NULL AND created_at < ? AND importance <= ? AND confidence <= ? AND last_confirmed_at IS NULL').run(new Date().toISOString(), cutoffIso, maxImportance, maxConfidence).changes);
+    const now = new Date().toISOString();
+    return Number(db.prepare("UPDATE memories SET forgotten_at = ?, status = 'FORGOTTEN', updated_at = ? WHERE status IN ('ACTIVE','UNCERTAIN') AND created_at < ? AND importance <= ? AND confidence <= ? AND last_confirmed_at IS NULL").run(now, now, cutoffIso, maxImportance, maxConfidence).changes);
   }
   function searchMemoriesText(query, limit = 50) {
     const match = ftsQuery(query); if (!match) return [];
     return db.prepare('SELECT id, bm25(memories_fts) AS rank FROM memories_fts WHERE memories_fts MATCH ? ORDER BY rank LIMIT ?').all(match, limit).map(row => ({ id: row.id, rank: row.rank }));
   }
+  function recordMemoryConflict({ oldMemoryId = null, newMemoryId = null, resolution = 'UNCERTAIN', status = 'OPEN', reason, evidence = [] }) {
+    const record = { id: randomUUID(), oldMemoryId, newMemoryId, resolution, status, reason, evidence, createdAt: new Date().toISOString() };
+    db.prepare('INSERT INTO memory_conflicts (id,old_memory_id,new_memory_id,resolution,status,reason,evidence_json,created_at) VALUES (?,?,?,?,?,?,?,?)')
+      .run(record.id, oldMemoryId, newMemoryId, resolution, status, reason, JSON.stringify(evidence), record.createdAt);
+    return record;
+  }
+  function listMemoryConflicts(status = null, limit = 100) {
+    const rows = status ? db.prepare('SELECT * FROM memory_conflicts WHERE status=? ORDER BY created_at DESC LIMIT ?').all(status, limit) : db.prepare('SELECT * FROM memory_conflicts ORDER BY created_at DESC LIMIT ?').all(limit);
+    return rows.map(row => ({ id: row.id, oldMemoryId: row.old_memory_id, newMemoryId: row.new_memory_id, resolution: row.resolution, status: row.status, reason: row.reason, evidence: json(row.evidence_json, []), createdAt: row.created_at, resolvedAt: row.resolved_at }));
+  }
+  function resolveMemoryConflict(id, resolution) { db.prepare("UPDATE memory_conflicts SET resolution=?, status='RESOLVED', resolved_at=? WHERE id=?").run(resolution, new Date().toISOString(), id); return listMemoryConflicts(null, 1000).find(item => item.id === id) || null; }
   function replaceDocumentChunks(source, chunks) {
     db.prepare('DELETE FROM document_chunks_fts WHERE source = ?').run(source);
     db.prepare('DELETE FROM document_chunks WHERE source = ?').run(source);
@@ -529,9 +650,49 @@ export function createDatabase(dataDir) {
   function getProjectWorkspace(root) { const row = db.prepare('SELECT * FROM project_workspaces WHERE root=?').get(root); return row ? { id: row.id, root: row.root, name: row.name, state: json(row.state_json, {}), instructions: json(row.instructions_json, {}), createdAt: row.created_at, updatedAt: row.updated_at } : null; }
   function listProjectWorkspaces(limit = 50) { return db.prepare('SELECT root FROM project_workspaces ORDER BY updated_at DESC LIMIT ?').all(limit).map(row => getProjectWorkspace(row.root)); }
 
+  function upsertEntity({ type = 'CONCEPT', name, scope = 'global', metadata = {} }) {
+    const normalized = String(name).normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().replace(/\s+/g, ' ').trim();
+    if (!normalized) throw new Error('Entidade sem nome.');
+    const now = new Date().toISOString(); const existing = db.prepare('SELECT * FROM knowledge_entities WHERE type=? AND normalized=? AND scope=?').get(type, normalized, scope);
+    const id = existing?.id || randomUUID();
+    db.prepare(`INSERT INTO knowledge_entities (id,type,name,normalized,scope,metadata_json,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?)
+      ON CONFLICT(type,normalized,scope) DO UPDATE SET name=excluded.name,metadata_json=excluded.metadata_json,updated_at=excluded.updated_at`)
+      .run(id, type, name, normalized, scope, JSON.stringify({ ...json(existing?.metadata_json, {}), ...metadata }), existing?.created_at || now, now);
+    return getEntity(id);
+  }
+  function getEntity(id) { const row = db.prepare('SELECT * FROM knowledge_entities WHERE id=?').get(id); return row ? { id: row.id, type: row.type, name: row.name, normalized: row.normalized, scope: row.scope, metadata: json(row.metadata_json, {}), createdAt: row.created_at, updatedAt: row.updated_at } : null; }
+  function listEntities({ scope = null, query = null, limit = 100 } = {}) {
+    const clauses = []; const params = []; if (scope) { clauses.push('scope=?'); params.push(scope); } if (query) { clauses.push('(normalized LIKE ? OR name LIKE ?)'); params.push(`%${String(query).toLowerCase()}%`, `%${String(query)}%`); }
+    params.push(Math.max(1, Math.min(Number(limit) || 100, 1000)));
+    return db.prepare(`SELECT id FROM knowledge_entities ${clauses.length ? `WHERE ${clauses.join(' AND ')}` : ''} ORDER BY updated_at DESC LIMIT ?`).all(...params).map(row => getEntity(row.id));
+  }
+  function linkEntities({ fromEntityId, toEntityId, type = 'RELATED_TO', confidence = 0.7, sourceMemoryId = null, metadata = {} }) {
+    const allowed = new Set(['USES','DEPENDS_ON','RELATED_TO','CAUSED_BY','FIXED_BY','DECIDED','PREFERS','PART_OF','SUPERSEDES','CONTRADICTS','VERIFIED_BY']);
+    const relationType = allowed.has(type) || /^CUSTOM_[A-Z0-9_]{2,40}$/.test(type) ? type : 'RELATED_TO';
+    const now = new Date().toISOString(); const id = randomUUID();
+    db.prepare(`INSERT INTO knowledge_relations (id,from_entity_id,to_entity_id,type,confidence,source_memory_id,status,metadata_json,created_at,updated_at)
+      VALUES (?,?,?,?,?,?,?,?,?,?) ON CONFLICT(from_entity_id,to_entity_id,type,source_memory_id) DO UPDATE SET confidence=MAX(confidence,excluded.confidence),status='ACTIVE',metadata_json=excluded.metadata_json,updated_at=excluded.updated_at`)
+      .run(id, fromEntityId, toEntityId, relationType, confidence, sourceMemoryId, 'ACTIVE', JSON.stringify(metadata), now, now);
+    return db.prepare('SELECT id FROM knowledge_relations WHERE from_entity_id=? AND to_entity_id=? AND type=? AND source_memory_id IS ?').get(fromEntityId, toEntityId, relationType, sourceMemoryId)?.id || id;
+  }
+  function listRelations({ entityId = null, type = null, scope = null, limit = 200 } = {}) {
+    const clauses = ["r.status='ACTIVE'"]; const params = [];
+    if (entityId) { clauses.push('(r.from_entity_id=? OR r.to_entity_id=?)'); params.push(entityId, entityId); }
+    if (type) { clauses.push('r.type=?'); params.push(type); }
+    if (scope) { clauses.push('(f.scope=? AND t.scope=?)'); params.push(scope, scope); }
+    params.push(Math.max(1, Math.min(Number(limit) || 200, 2000)));
+    return db.prepare(`SELECT r.*, f.name AS from_name, t.name AS to_name FROM knowledge_relations r JOIN knowledge_entities f ON f.id=r.from_entity_id JOIN knowledge_entities t ON t.id=r.to_entity_id WHERE ${clauses.join(' AND ')} ORDER BY r.confidence DESC,r.updated_at DESC LIMIT ?`).all(...params).map(row => ({ id: row.id, fromEntityId: row.from_entity_id, from: row.from_name, toEntityId: row.to_entity_id, to: row.to_name, type: row.type, confidence: row.confidence, sourceMemoryId: row.source_memory_id, status: row.status, metadata: json(row.metadata_json, {}), createdAt: row.created_at, updatedAt: row.updated_at }));
+  }
+  function putDocumentSource(record) { const now = new Date().toISOString(); db.prepare(`INSERT INTO document_sources (source,content_hash,mtime_ms,size,source_version,embedding_model,last_verified_at,indexed_at,metadata_json) VALUES (?,?,?,?,?,?,?,?,?) ON CONFLICT(source) DO UPDATE SET content_hash=excluded.content_hash,mtime_ms=excluded.mtime_ms,size=excluded.size,source_version=excluded.source_version,embedding_model=excluded.embedding_model,last_verified_at=excluded.last_verified_at,indexed_at=excluded.indexed_at,metadata_json=excluded.metadata_json`).run(record.source, record.contentHash, record.mtimeMs ?? null, record.size ?? null, record.sourceVersion || null, record.embeddingModel, now, now, JSON.stringify(record.metadata || {})); return getDocumentSource(record.source); }
+  function getDocumentSource(source) { const row = db.prepare('SELECT * FROM document_sources WHERE source=?').get(source); return row ? { source: row.source, contentHash: row.content_hash, mtimeMs: row.mtime_ms, size: row.size, sourceVersion: row.source_version, embeddingModel: row.embedding_model, lastVerifiedAt: row.last_verified_at, indexedAt: row.indexed_at, metadata: json(row.metadata_json, {}) } : null; }
+  function putSessionHandoff({ id = randomUUID(), sessionId, scope = 'global', state }) { const now = new Date().toISOString(); db.prepare(`INSERT INTO session_handoffs (id,session_id,scope,state_json,created_at,updated_at) VALUES (?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET state_json=excluded.state_json,updated_at=excluded.updated_at`).run(id, sessionId, scope, JSON.stringify(state || {}), now, now); return getSessionHandoff(sessionId, scope); }
+  function getSessionHandoff(sessionId, scope = 'global') { const row = db.prepare('SELECT * FROM session_handoffs WHERE session_id=? AND scope=? ORDER BY updated_at DESC LIMIT 1').get(sessionId, scope); return row ? { id: row.id, sessionId: row.session_id, scope: row.scope, state: json(row.state_json, {}), createdAt: row.created_at, updatedAt: row.updated_at } : null; }
+  function upsertEmbeddingSpace({ model, dimensions, version = '1', compatible = true }) { db.prepare(`INSERT INTO embedding_spaces (model,dimensions,version,compatible,updated_at) VALUES (?,?,?,?,?) ON CONFLICT(model) DO UPDATE SET dimensions=excluded.dimensions,version=excluded.version,compatible=excluded.compatible,updated_at=excluded.updated_at`).run(model, dimensions, version, compatible ? 1 : 0, new Date().toISOString()); return { model, dimensions, version, compatible }; }
+
   return {
     db, createTask, getTask, listTasks, listChildTasks, updateTask, incrementTaskUsage, mergeWorkingMemory, addEvent, getEvents, addToolRun, getToolRuns, getToolRunFull,
-    createPermission, resolvePermission, getPermission, getPermissions, putMemory, listMemories, touchMemory, updateMemoryVector, reinforceMemory, contradictMemory, forgetMemories, searchMemoriesText,
+    createPermission, resolvePermission, getPermission, getPermissions, putMemory, getMemory, listMemories, updateMemory, setMemoryStatus, deleteMemory, touchMemory, updateMemoryVector, reinforceMemory, contradictMemory, forgetMemories, searchMemoriesText,
+    recordMemoryConflict, listMemoryConflicts, resolveMemoryConflict,
     replaceDocumentChunks, listDocumentChunks, updateDocumentChunkVector, searchDocumentChunksText, putSession, getSession, replaceTaskGraph, getTaskGraph,
     putCheckpoint, listCheckpoints, pruneCheckpoints, putRepositoryMap, getRepositoryMap, listInterruptedTasks,
     addRuntimeEvent, listRuntimeEvents, createBackgroundJob, getBackgroundJob, listBackgroundJobs, listDueBackgroundJobs, updateBackgroundJob,
@@ -541,5 +702,6 @@ export function createDatabase(dataDir) {
     putArtifact, getArtifact, listArtifacts, linkArtifacts, getArtifactProvenance, createMediaJob, getMediaJob, updateMediaJob, listMediaJobs, addPerformanceSample, listPerformanceSamples,
     putHypothesis, getHypothesis, updateHypothesis, listHypotheses, createCapabilityGrant, getCapabilityGrant, revokeCapabilityGrant,
     addAgentMessage, listAgentMessages, putProjectWorkspace, getProjectWorkspace, listProjectWorkspaces,
+    upsertEntity, getEntity, listEntities, linkEntities, listRelations, putDocumentSource, getDocumentSource, putSessionHandoff, getSessionHandoff, upsertEmbeddingSpace,
   };
 }

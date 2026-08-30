@@ -1,4 +1,4 @@
-import type { AgentHealth, AgentTask, BackgroundJob, Chat, ChatMessage, Effort, LocalAttachment, LocalDocument, MediaArtifact, MediaJob, NexoSkill, RuntimeEvent, RuntimeImmediateResponse, RuntimeStreamEvent, UserProfile } from './types';
+import type { AgentHealth, AgentTask, BackgroundJob, Chat, ChatMessage, Effort, LocalAttachment, LocalDocument, MediaArtifact, MediaJob, NexoMemory, NexoSkill, RuntimeEvent, RuntimeImmediateResponse, RuntimeStreamEvent, UserProfile } from './types';
 
 export const NEXO_AGENT_URL = 'http://127.0.0.1:7331';
 
@@ -48,6 +48,15 @@ export class NexoClient {
   }
   async remember(content: string, options: { kind: string; importance: number; confidence?: number; source?: string; metadata?: Record<string, unknown> }) {
     return jsonResponse(await fetch(`${this.baseUrl}/agent/memory`, { method: 'POST', headers: this.headers(true), body: JSON.stringify({ content, ...options }) }));
+  }
+  async listMemories(options: { query?: string; scope?: string; limit?: number } = {}) {
+    const parameters = new URLSearchParams({ limit: String(options.limit || 100) });
+    if (options.scope) parameters.set('scope', options.scope);
+    const path = options.query ? `/agent/memory/search?q=${encodeURIComponent(options.query)}&${parameters}` : `/agent/memory?${parameters}`;
+    return (await jsonResponse<{ memories: NexoMemory[] }>(await fetch(`${this.baseUrl}${path}`, { headers: this.headers() }))).memories;
+  }
+  async manageMemory(id: string, action: 'update' | 'confirm' | 'forget' | 'delete', patch?: Partial<NexoMemory>) {
+    return jsonResponse<{ memory?: NexoMemory; deleted?: boolean }>(await fetch(`${this.baseUrl}/agent/memory/${id}`, { method: 'POST', headers: this.headers(true), body: JSON.stringify({ action, patch, ...(action === 'delete' ? { confirmation: 'DELETE' } : {}) }) }));
   }
   async indexText(source: string, content: string, metadata?: Record<string, unknown>) {
     return jsonResponse(await fetch(`${this.baseUrl}/agent/rag/text`, { method: 'POST', headers: this.headers(true), body: JSON.stringify({ source, content, metadata }) }));
