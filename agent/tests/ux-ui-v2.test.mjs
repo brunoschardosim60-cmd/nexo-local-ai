@@ -10,6 +10,10 @@ const styles = await readFile(
   new URL('../../app/globals.css', import.meta.url),
   'utf8',
 );
+const livingEye = await readFile(
+  new URL('../../components/nexo/nexo-living-eye.tsx', import.meta.url),
+  'utf8',
+);
 
 test('UX 2.0 keeps the chat-first shell and progressive controls', () => {
   assert.match(page, /nexo-shell/);
@@ -38,4 +42,32 @@ test('UX 2.0 has semantic design tokens and reduced-motion support', () => {
   }
   assert.match(styles, /prefers-reduced-motion:\s*reduce/);
   assert.match(styles, /\.nexo-orb/);
+});
+
+test('Living Eye exposes its complete state machine and biological motion', () => {
+  for (const state of [
+    'idle',
+    'listening',
+    'understanding',
+    'thinking',
+    'speaking',
+    'working',
+    'success',
+    'error',
+    'offline',
+    'resting',
+  ]) {
+    assert.match(livingEye, new RegExp(`'${state}'`));
+  }
+  assert.match(livingEye, /LIVING_EYE_TRANSITIONS/);
+  assert.match(styles, /nexo-living-eye-blink-double/);
+  assert.match(livingEye, /requestAnimationFrame/);
+});
+
+test('Living Eye measures real microphone energy and applies smoothing', () => {
+  assert.match(livingEye, /getUserMedia/);
+  assert.match(livingEye, /createAnalyser/);
+  assert.match(livingEye, /getFloatTimeDomainData/);
+  assert.match(livingEye, /Math\.sqrt\(sum \/ samples\.length\)/);
+  assert.match(livingEye, /echoCancellation: true/);
 });

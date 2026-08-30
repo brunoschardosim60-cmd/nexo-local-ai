@@ -32,7 +32,6 @@ import {
   Library,
   Menu,
   Mic,
-  MicOff,
   Keyboard,
   LayoutDashboard,
   Monitor,
@@ -104,6 +103,11 @@ import { PresenceControls } from '@/components/nexo/presence-controls';
 import { CapabilityCenter } from '@/components/nexo/capability-center';
 import { NexoOrb } from '@/components/nexo/nexo-orb';
 import { ArtifactPanel } from '@/components/nexo/artifact-panel';
+import {
+  NexoLivingEyeMini,
+  NexoVoicePresence,
+  type LivingEyeState,
+} from '@/components/nexo/nexo-living-eye';
 
 type Weather = {
   label: string;
@@ -133,6 +137,7 @@ type LocalSpeechRecognition = {
   lang: string;
   interimResults: boolean;
   start(): void;
+  stop(): void;
   onstart: (() => void) | null;
   onend: (() => void) | null;
   onerror: (() => void) | null;
@@ -517,6 +522,12 @@ export default function Home() {
   const [webSearch, setWebSearch] = useState(false);
   const [listening, setListening] = useState(false);
   const [voiceOutput, setVoiceOutput] = useState(false);
+  const [speaking, setSpeaking] = useState(false);
+  const [voiceModeOpen, setVoiceModeOpen] = useState(false);
+  const [voiceCaption, setVoiceCaption] = useState('');
+  const [voiceOutputLevel, setVoiceOutputLevel] = useState(0);
+  const [voicePreviewState, setVoicePreviewState] =
+    useState<LivingEyeState | null>(null);
   const [profileOpen, setProfileOpen] = useState(false);
   const [securityOpen, setSecurityOpen] = useState(false);
   const [memoryOpen, setMemoryOpen] = useState(false);
@@ -548,6 +559,8 @@ export default function Home() {
   const fileInput = useRef<HTMLInputElement>(null);
   const messagesEnd = useRef<HTMLDivElement>(null);
   const requestController = useRef<AbortController | null>(null);
+  const recognitionRef = useRef<LocalSpeechRecognition | null>(null);
+  const voicePulseTimer = useRef(0);
 
   const activeChat = useMemo(
     () => chats.find((chat) => chat.id === activeChatId),
@@ -561,12 +574,46 @@ export default function Home() {
       ),
     [chats, chatSearch],
   );
+  const voiceEyeState: LivingEyeState =
+    voicePreviewState ??
+    (!agentOnline
+      ? 'offline'
+      : listening
+        ? 'listening'
+        : speaking
+          ? 'speaking'
+          : loading
+            ? mode === 'Agente'
+              ? 'working'
+              : 'thinking'
+            : 'idle');
 
   useEffect(() => {
     const storedChats = safeParse<Chat[]>(
       localStorage.getItem('nexo-chats'),
       [],
     );
+    const previewState = new URLSearchParams(window.location.search).get(
+      'voice-eye-state',
+    ) as LivingEyeState | null;
+    if (
+      previewState &&
+      [
+        'idle',
+        'listening',
+        'understanding',
+        'thinking',
+        'speaking',
+        'working',
+        'success',
+        'error',
+        'offline',
+        'resting',
+      ].includes(previewState)
+    ) {
+      setVoicePreviewState(previewState);
+      setVoiceModeOpen(true);
+    }
     const storedProfile = {
       ...DEFAULT_PROFILE,
       ...safeParse<Partial<UserProfile>>(
@@ -1029,6 +1076,10 @@ export default function Home() {
   }
 
   function startVoice() {
+    if (listening) {
+      recognitionRef.current?.stop();
+      return;
+    }
     const speechWindow = window as SpeechWindow;
     const Recognition =
       speechWindow.SpeechRecognition || speechWindow.webkitSpeechRecognition;
@@ -1037,16 +1088,25 @@ export default function Home() {
       return;
     }
     speechSynthesis?.cancel();
+    setSpeaking(false);
+    setVoiceOutputLevel(0);
     if (agentToken)
       void new NexoClient(agentToken)
         .updatePresence({ action: 'barge-in' })
         .catch(() => undefined);
     const recognition = new Recognition();
+    recognitionRef.current = recognition;
     recognition.lang = 'pt-BR';
     recognition.interimResults = false;
     recognition.onstart = () => setListening(true);
-    recognition.onend = () => setListening(false);
-    recognition.onerror = () => setListening(false);
+    recognition.onend = () => {
+      recognitionRef.current = null;
+      setListening(false);
+    };
+    recognition.onerror = () => {
+      recognitionRef.current = null;
+      setListening(false);
+    };
     recognition.onresult = (event) => setPrompt(event.results[0][0].transcript);
     recognition.start();
   }
@@ -1066,6 +1126,9 @@ export default function Home() {
     utterance.rate = 0.98;
     utterance.pitch = 1;
     utterance.onstart = () => {
+      setSpeaking(true);
+      setVoiceCaption(concise);
+      setVoiceOutputLevel(0.34);
       if (agentToken)
         void new NexoClient(agentToken)
           .updatePresence({
@@ -1074,13 +1137,36 @@ export default function Home() {
           })
           .catch(() => undefined);
     };
+    utterance.onboundary = (event) => {
+      const pulse = 0.26 + ((event.charIndex * 37) % 53) / 100;
+      setVoiceOutputLevel(Math.min(0.82, pulse));
+      window.clearTimeout(voicePulseTimer.current);
+      voicePulseTimer.current = window.setTimeout(
+        () => setVoiceOutputLevel(0.18),
+        95,
+      );
+    };
     utterance.onend = () => {
+      setSpeaking(false);
+      setVoiceOutputLevel(0);
       if (agentToken)
         void new NexoClient(agentToken)
           .updatePresence({ action: 'update', patch: { speaking: false } })
           .catch(() => undefined);
     };
     speechSynthesis.speak(utterance);
+  }
+
+  function stopVoicePresence() {
+    recognitionRef.current?.stop();
+    recognitionRef.current = null;
+    speechSynthesis?.cancel();
+    window.clearTimeout(voicePulseTimer.current);
+    setListening(false);
+    setSpeaking(false);
+    setVoiceOutputLevel(0);
+    if (agentToken)
+      void new NexoClient(agentToken).killPresence().catch(() => undefined);
   }
 
   function download(content: string, filename: string, type: string) {
@@ -2303,13 +2389,12 @@ export default function Home() {
                       />
                       <Button
                         size="icon-sm"
-                        variant={listening ? 'secondary' : 'ghost'}
-                        className={listening ? 'text-rose-400' : ''}
-                        aria-label="Falar"
-                        title="Falar"
-                        onClick={startVoice}
+                        variant={voiceModeOpen ? 'secondary' : 'ghost'}
+                        aria-label="Abrir conversa por voz"
+                        title="Conversa por voz"
+                        onClick={() => setVoiceModeOpen(true)}
                       >
-                        {listening ? <MicOff /> : <Mic />}
+                        <NexoLivingEyeMini state={voiceEyeState} />
                       </Button>
                       <Button
                         size="icon-sm"
@@ -2701,6 +2786,23 @@ export default function Home() {
         message={selectedArtifact}
         token={agentToken}
         onClose={() => setSelectedArtifact(null)}
+      />
+      <NexoVoicePresence
+        open={voiceModeOpen}
+        onOpenChange={(open) => {
+          setVoiceModeOpen(open);
+          if (!open) stopVoicePresence();
+        }}
+        state={voiceEyeState}
+        transcript={prompt}
+        caption={voiceCaption}
+        outputLevel={voicePreviewState === 'speaking' ? 0.58 : voiceOutputLevel}
+        preview={voicePreviewState !== null}
+        onListen={() => {
+          setVoiceOutput(true);
+          startVoice();
+        }}
+        onStop={stopVoicePresence}
       />
 
       <Dialog open={profileOpen} onOpenChange={setProfileOpen}>
