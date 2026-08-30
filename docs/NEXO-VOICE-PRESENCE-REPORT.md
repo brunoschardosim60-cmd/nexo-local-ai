@@ -2,8 +2,8 @@
 
 ## IMPLEMENTATION
 
-- `public/nexo/living-eye-base.png`: base visual original gerada a partir das duas referências, sem copiar nenhuma delas.
-- `public/nexo/living-eye-closed.png`: estado orgânico fechado, usado apenas durante os milissegundos de blink e no repouso.
+- `public/nexo/living-eye-base.png`: baleia abissal viva em macro, com globo quase preto, luz azul em profundidade e ramificações internas assimétricas.
+- `public/nexo/living-eye-closed.png`: o mesmo animal com pálpebras pesadas totalmente fechadas, usado durante o blink e no repouso.
 - `components/nexo/nexo-living-eye.tsx`: `NexoLivingEye`, `NexoLivingEyeMini`, modo de voz imersivo, state machine, Canvas 2D e analisador de áudio.
 - `app/globals.css`: pálpebras, profundidade, umidade, respiração, estados, responsividade e reduced motion.
 - `app/page.tsx`: ligação com reconhecimento de voz, TTS, barge-in, loading do chat, Agent e runtime local.
@@ -22,11 +22,11 @@ Os intervalos usam PRNG com seed e distribuição entre aproximadamente 3,8 e 11
 
 ## MOTION SYSTEM
 
-Micro-saccades usam random walk controlado; pointer parallax é limitado; a respiração combina períodos não coincidentes; reflexo úmido desloca lentamente; Canvas desenha rede radial orgânica, glow subsuperficial e impulsos irregulares. O estado não reinicia o loop do Canvas, então brilho e energia interpolam suavemente.
+Micro-saccades usam random walk controlado; pointer parallax é limitado; a respiração combina períodos não coincidentes; reflexo úmido desloca lentamente. A rede orgânica principal agora faz parte da anatomia do asset, enquanto o Canvas foi reduzido a micro-impulsos e glow subsuperficial discretos para não recriar uma íris humana radial. O estado não reinicia o loop do Canvas, então brilho e energia interpolam suavemente.
 
 ## PERFORMANCE
 
-Não foi adicionada biblioteca 3D. O motor usa Canvas 2D, DPR limitado e três níveis de qualidade: high (82 ramos), medium (52) e low (28). O modo `auto` considera `hardwareConcurrency` e reduced motion. A aba oculta deixa de desenhar e o miniolho força low. A imagem-base é carregada uma vez e reutilizada pelo cache.
+Não foi adicionada biblioteca 3D. O motor usa Canvas 2D em baixa opacidade, DPR limitado e três níveis de qualidade. O modo `auto` considera `hardwareConcurrency` e reduced motion. A aba oculta deixa de desenhar e o miniolho força low. A imagem-base é carregada uma vez e reutilizada pelo cache.
 
 ## RESPONSIVE
 
@@ -45,7 +45,11 @@ O olho anuncia seu estado por nome acessível; controles têm labels; o texto do
 
 ## SCREENSHOTS
 
-Os estados estão em `docs/voice-presence/screenshots/`: `idle`, `listening`, `understanding`, `thinking`, `speaking`, `working`, `success`, `error`, `offline`, `resting` e `listening-mobile`.
+Os estados estão em `docs/voice-presence/screenshots/`: `idle`, `listening`, `understanding`, `thinking`, `speaking`, `working`, `success`, `error`, `offline`, `resting` e `listening-mobile`. A revisão visual de baleia V2 acrescenta `whale-eye-v2-listening-desktop.png` e `whale-eye-v2-listening-mobile.png`.
+
+## WHALE EYE V2
+
+A segunda direção visual preserva toda a arquitetura comportamental e substitui apenas a presença orgânica. O globo ficou maior e vítreo para expor a rede interna da referência; o centro continua quase preto, sem pupila humana limpa. As bordas do asset agora desaparecem gradualmente no ambiente, em vez de formar um quadrado arredondado. A camada circular de pupila e o Canvas radial foram reduzidos para que as ramificações anatômicas do olho sejam a leitura dominante. Os prompts e as referências usados nesta revisão estão documentados em `docs/voice-presence/WHALE-EYE-V2-PROMPTS.md`.
 
 ## VIDEO/GIF DE TESTE
 
