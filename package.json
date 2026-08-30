@@ -9,6 +9,7 @@
     "dev": "vinext dev",
     "agent": "node local-agent.mjs",
     "test:agent": "node --test agent/tests/*.test.mjs",
+    "test:ux": "node --test agent/tests/ux-ui-v2.test.mjs",
     "eval:agent": "node agent/evals/runtime-eval.mjs",
     "eval:intelligence": "node agent/evals/intelligence-v4-eval.mjs",
     "eval:media": "node agent/evals/media-v4-eval.mjs",
