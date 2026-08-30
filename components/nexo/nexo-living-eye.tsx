@@ -90,6 +90,19 @@ const STATE_LABELS: Record<LivingEyeState, string> = {
   resting: 'Em repouso',
 };
 
+const STATE_ENERGY: Record<LivingEyeState, number> = {
+  idle: 0.12,
+  listening: 0.42,
+  understanding: 0.3,
+  thinking: 0.34,
+  speaking: 0.48,
+  working: 0.39,
+  success: 0.26,
+  error: 0.08,
+  offline: 0.035,
+  resting: 0.015,
+};
+
 function clamp(value: number, min = 0, max = 1) {
   return Math.min(max, Math.max(min, value));
 }
@@ -127,6 +140,8 @@ export function NexoLivingEye({
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [blink, setBlink] = useState<'normal' | 'double' | 'long' | null>(null);
   const [gaze, setGaze] = useState({ x: 0, y: 0 });
+  const [waking, setWaking] = useState(false);
+  const previousStateRef = useRef(state);
   const qualityLevel = useMemo(
     () => resolvedQuality(quality, mini),
     [quality, mini],
@@ -139,6 +154,20 @@ export function NexoLivingEye({
   outputRef.current = outputLevel;
   gazeRef.current = gaze;
   stateRef.current = state;
+
+  useEffect(() => {
+    const previous = previousStateRef.current;
+    previousStateRef.current = state;
+    if (
+      (previous === 'resting' || previous === 'offline') &&
+      state !== 'resting' &&
+      state !== 'offline'
+    ) {
+      setWaking(true);
+      const timer = window.setTimeout(() => setWaking(false), 1050);
+      return () => window.clearTimeout(timer);
+    }
+  }, [state]);
 
   useEffect(() => {
     if (mini || state === 'resting') return;
@@ -190,28 +219,18 @@ export function NexoLivingEye({
     const context = canvas.getContext('2d');
     if (!context) return;
     const random = seeded(0x4e45584f);
-    const branches = Array.from(
-      {
-        length:
-          qualityLevel === 'high' ? 82 : qualityLevel === 'medium' ? 52 : 28,
-      },
-      (_, index) => ({
-        angle:
-          (index /
-            (qualityLevel === 'high'
-              ? 82
-              : qualityLevel === 'medium'
-                ? 52
-                : 28)) *
-            Math.PI *
-            2 +
-          (random() - 0.5) * 0.08,
-        length: 0.1 + random() * 0.14,
-        bend: (random() - 0.5) * 0.19,
-        phase: random() * Math.PI * 2,
-        width: 0.35 + random() * 0.8,
-      }),
-    );
+    const branchCount =
+      qualityLevel === 'high' ? 34 : qualityLevel === 'medium' ? 22 : 12;
+    const branches = Array.from({ length: branchCount }, () => ({
+      angle: Math.PI * (1.03 + random() * 0.94),
+      length: 0.075 + random() * 0.12,
+      bend: (random() - 0.5) * 0.72,
+      fork: (random() - 0.5) * 0.42,
+      phase: random() * Math.PI * 2,
+      width: 0.28 + random() * 0.58,
+      alpha: 0.35 + random() * 0.65,
+      origin: (random() - 0.5) * 0.035,
+    }));
     let frame = 0;
     let smoothed = 0;
     let smoothedGlow = 0.11;
@@ -242,14 +261,18 @@ export function NexoLivingEye({
       const cy = height * 0.522 + gazeRef.current.y * dpr;
       const targetGlow =
         currentState === 'offline' || currentState === 'resting'
-          ? 0.07
+          ? 0.035
           : currentState === 'error'
-            ? 0.12
-            : currentState === 'listening' || currentState === 'speaking'
-              ? 0.25
-              : currentState === 'thinking' || currentState === 'working'
-                ? 0.2
-                : 0.11;
+            ? 0.065
+            : currentState === 'speaking'
+              ? 0.31
+              : currentState === 'listening'
+                ? 0.27
+                : currentState === 'thinking' || currentState === 'working'
+                  ? 0.22
+                  : currentState === 'understanding'
+                    ? 0.18
+                    : 0.1;
       smoothedGlow += (targetGlow - smoothedGlow) * 0.045;
       const pulse =
         (Math.sin(time * 0.0017) + Math.sin(time * 0.00073 + 1.7)) * 0.04;
@@ -272,11 +295,18 @@ export function NexoLivingEye({
       context.fillRect(0, 0, width, height);
       context.globalCompositeOperation = 'screen';
       for (const branch of branches) {
-        const activity =
+        const cognitiveActivity =
           currentState === 'thinking' || currentState === 'working'
-            ? 0.2 + 0.18 * Math.sin(time * 0.0021 + branch.phase)
-            : smoothed * 0.38;
-        const inner = scale * 0.09;
+            ? 0.16 + 0.12 * Math.sin(time * 0.00145 + branch.phase)
+            : currentState === 'understanding'
+              ? 0.11 + 0.06 * Math.sin(time * 0.0011 + branch.phase)
+              : 0;
+        const voiceActivity =
+          currentState === 'listening' || currentState === 'speaking'
+            ? smoothed * 0.34
+            : 0;
+        const activity = cognitiveActivity + voiceActivity;
+        const inner = scale * (0.022 + branch.origin);
         const outer = scale * (branch.length + activity * 0.035);
         const sx = cx + Math.cos(branch.angle) * inner;
         const sy = cy + Math.sin(branch.angle) * inner;
@@ -284,17 +314,59 @@ export function NexoLivingEye({
         const ey = cy + Math.sin(branch.angle + branch.bend) * outer;
         context.beginPath();
         context.moveTo(sx, sy);
-        context.quadraticCurveTo(
-          cx + Math.cos(branch.angle + branch.bend * 0.35) * outer * 0.68,
-          cy + Math.sin(branch.angle + branch.bend * 0.35) * outer * 0.68,
+        context.bezierCurveTo(
+          cx + Math.cos(branch.angle - branch.bend * 0.22) * outer * 0.32,
+          cy + Math.sin(branch.angle - branch.bend * 0.22) * outer * 0.32,
+          cx + Math.cos(branch.angle + branch.bend * 0.52) * outer * 0.7,
+          cy + Math.sin(branch.angle + branch.bend * 0.52) * outer * 0.7,
           ex,
           ey,
         );
         context.strokeStyle =
           currentState === 'error'
-            ? `rgba(208,76,123,${0.08 + activity})`
-            : `rgba(64,216,255,${0.08 + activity + smoothed * 0.15})`;
+            ? `rgba(113,134,157,${(0.025 + activity * 0.2) * branch.alpha})`
+            : `rgba(72,214,244,${(0.045 + activity + smoothed * 0.1) * branch.alpha})`;
         context.lineWidth = branch.width * dpr;
+        context.stroke();
+
+        if (qualityLevel !== 'low' && branch.alpha > 0.62) {
+          const forkStartX = cx + (ex - cx) * 0.58;
+          const forkStartY = cy + (ey - cy) * 0.58;
+          const forkAngle = branch.angle + branch.bend + branch.fork;
+          context.beginPath();
+          context.moveTo(forkStartX, forkStartY);
+          context.quadraticCurveTo(
+            forkStartX + Math.cos(forkAngle - branch.fork * 0.4) * outer * 0.16,
+            forkStartY + Math.sin(forkAngle - branch.fork * 0.4) * outer * 0.16,
+            forkStartX + Math.cos(forkAngle) * outer * 0.28,
+            forkStartY + Math.sin(forkAngle) * outer * 0.28,
+          );
+          context.lineWidth = branch.width * dpr * 0.58;
+          context.strokeStyle = `rgba(99,222,244,${(0.025 + activity * 0.52) * branch.alpha})`;
+          context.stroke();
+        }
+      }
+
+      if (
+        currentState === 'listening' ||
+        currentState === 'speaking' ||
+        currentState === 'working'
+      ) {
+        const wavePhase =
+          (time * (currentState === 'speaking' ? 0.00046 : 0.00028)) % 1;
+        const waveRadius = scale * (0.085 + wavePhase * 0.12);
+        context.beginPath();
+        context.ellipse(
+          cx + Math.sin(time * 0.00037) * scale * 0.004,
+          cy,
+          waveRadius * 1.08,
+          waveRadius * 0.86,
+          -0.08,
+          Math.PI * 1.08,
+          Math.PI * 1.9,
+        );
+        context.strokeStyle = `rgba(83,221,248,${(1 - wavePhase) * (0.025 + smoothed * 0.13)})`;
+        context.lineWidth = Math.max(0.45, dpr * 0.55);
         context.stroke();
       }
       context.globalCompositeOperation = 'source-over';
@@ -327,6 +399,7 @@ export function NexoLivingEye({
     '--eye-energy': clamp(
       (state === 'speaking' ? outputLevel : inputLevel) * intensity,
     ),
+    '--eye-state-energy': STATE_ENERGY[state],
   } as CSSProperties;
 
   return (
@@ -336,10 +409,12 @@ export function NexoLivingEye({
         'nexo-living-eye',
         `nexo-living-eye-${state}`,
         blink && `nexo-living-eye-blink-${blink}`,
+        waking && 'nexo-living-eye-wake',
         mini && 'nexo-living-eye-mini',
         className,
       )}
       style={style}
+      data-state={state}
       aria-label={`Olho vivo do ${BRAND_NAME}: ${STATE_LABELS[state]}`}
       onPointerMove={(event) => {
         if (mini) return;
@@ -351,34 +426,38 @@ export function NexoLivingEye({
       }}
       onPointerLeave={() => setGaze({ x: 0, y: 0 })}
     >
-      <Image
-            src={PRODUCT_BRAND.assets.livingEye}
-        alt=""
-        fill
-        sizes={mini ? '30px' : '(max-width: 640px) 88vw, 544px'}
-        priority={!mini}
-        draggable={false}
-        className="nexo-living-eye-base"
-      />
-      {!mini && (
+      <div className="nexo-living-eye-open" aria-hidden="true">
         <Image
-            src={PRODUCT_BRAND.assets.livingEyeClosed}
+          src={PRODUCT_BRAND.assets.livingEye}
           alt=""
           fill
-          sizes="(max-width: 640px) 88vw, 544px"
-          priority
+          sizes={mini ? '30px' : '(max-width: 640px) 96vw, 640px'}
+          priority={!mini}
           draggable={false}
-          className="nexo-living-eye-closed"
+          className="nexo-living-eye-base"
         />
+        <div className="nexo-living-eye-depth" />
+        <canvas ref={canvasRef} className="nexo-living-eye-canvas" />
+        <div className="nexo-living-eye-pupil" />
+        <div className="nexo-living-eye-membrane" />
+        <div className="nexo-living-eye-current" />
+        <div className="nexo-living-eye-glint" />
+      </div>
+      {!mini && (
+        <>
+          <Image
+            src={PRODUCT_BRAND.assets.livingEyeClosed}
+            alt=""
+            fill
+            sizes="(max-width: 640px) 96vw, 640px"
+            priority
+            draggable={false}
+            className="nexo-living-eye-closed"
+          />
+          <div className="nexo-living-eye-lid nexo-living-eye-lid-upper" />
+          <div className="nexo-living-eye-lid nexo-living-eye-lid-lower" />
+        </>
       )}
-      <div className="nexo-living-eye-depth" aria-hidden="true" />
-      <canvas
-        ref={canvasRef}
-        className="nexo-living-eye-canvas"
-        aria-hidden="true"
-      />
-      <div className="nexo-living-eye-pupil" aria-hidden="true" />
-      <div className="nexo-living-eye-glint" aria-hidden="true" />
     </figure>
   );
 }
@@ -399,6 +478,7 @@ type VoiceModeProps = {
   caption?: string;
   outputLevel?: number;
   preview?: boolean;
+  previewLevel?: number;
   onListen: () => void;
   onStop: () => void;
 };
@@ -411,6 +491,7 @@ export function NexoVoicePresence({
   caption = '',
   outputLevel = 0,
   preview = false,
+  previewLevel = 0.46,
   onListen,
   onStop,
 }: VoiceModeProps) {
@@ -427,11 +508,11 @@ export function NexoVoicePresence({
       streamRef.current?.getTracks().forEach((track) => track.stop());
       streamRef.current = null;
       setInputLevel(0);
+      setAudioStatus('idle');
       return;
     }
     if (preview) {
       setAudioStatus('ready');
-      setInputLevel(0.46);
       return;
     }
     let cancelled = false;
@@ -457,6 +538,7 @@ export function NexoVoicePresence({
         audioContext.createMediaStreamSource(stream).connect(analyser);
         const samples = new Float32Array(analyser.fftSize);
         let smooth = 0;
+        let noiseFloor = 0.008;
         let tick = 0;
         const measure = () => {
           analyser.getFloatTimeDomainData(samples);
@@ -467,7 +549,13 @@ export function NexoVoicePresence({
             peak = Math.max(peak, Math.abs(sample));
           }
           const rms = Math.sqrt(sum / samples.length);
-          const target = clamp(rms * 8.5 + peak * 0.9);
+          if (rms < noiseFloor * 2.4) {
+            noiseFloor += (rms - noiseFloor) * 0.035;
+          }
+          const gatedRms = Math.max(0, rms - noiseFloor * 1.3);
+          const gatedPeak = Math.max(0, peak - noiseFloor * 1.8);
+          const rawEnergy = gatedRms * 10.5 + gatedPeak * 0.72;
+          const target = rawEnergy < 0.025 ? 0 : clamp(rawEnergy ** 0.82);
           smooth += (target - smooth) * (target > smooth ? 0.25 : 0.08);
           if (tick++ % 2 === 0) setInputLevel(smooth);
           audioFrame.current = requestAnimationFrame(measure);
@@ -483,7 +571,7 @@ export function NexoVoicePresence({
       streamRef.current = null;
       if (audioContext) void audioContext.close();
     };
-  }, [open, preview, state]);
+  }, [open, preview, previewLevel, state]);
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -525,12 +613,15 @@ export function NexoVoicePresence({
         <main className="relative z-10 flex min-h-0 flex-1 flex-col items-center justify-center px-5 pb-[calc(6.5rem+env(safe-area-inset-bottom))] pt-3">
           <NexoLivingEye
             state={state}
-            inputLevel={inputLevel}
+            inputLevel={preview ? clamp(previewLevel) : inputLevel}
             outputLevel={outputLevel}
             intensity={0.88}
-            className="w-[min(78vw,34rem)]"
+            className="w-[min(84vw,40rem)]"
           />
-          <div className="mt-7 min-h-20 max-w-xl text-center">
+          <div
+            className="nexo-voice-status mt-5 min-h-20 max-w-xl text-center"
+            aria-live="polite"
+          >
             <p className="text-sm font-medium text-cyan-50/92">
               {STATE_LABELS[state]}
             </p>

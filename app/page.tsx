@@ -462,6 +462,9 @@ export default function Home() {
   const [voiceOutputLevel, setVoiceOutputLevel] = useState(0);
   const [voicePreviewState, setVoicePreviewState] =
     useState<LivingEyeState | null>(null);
+  const [voicePreviewLevel, setVoicePreviewLevel] = useState<number | null>(
+    null,
+  );
   const [profileOpen, setProfileOpen] = useState(false);
   const [securityOpen, setSecurityOpen] = useState(false);
   const [memoryOpen, setMemoryOpen] = useState(false);
@@ -495,6 +498,7 @@ export default function Home() {
   const requestController = useRef<AbortController | null>(null);
   const recognitionRef = useRef<LocalSpeechRecognition | null>(null);
   const voicePulseTimer = useRef(0);
+  const voiceBoundaryRef = useRef({ charIndex: 0, elapsedMs: 0 });
 
   const activeChat = useMemo(
     () => chats.find((chat) => chat.id === activeChatId),
@@ -530,6 +534,15 @@ export default function Home() {
     const previewState = new URLSearchParams(window.location.search).get(
       'voice-eye-state',
     ) as LivingEyeState | null;
+    const previewLevelParam = new URLSearchParams(window.location.search).get(
+      'voice-eye-level',
+    );
+    if (previewLevelParam !== null) {
+      const previewLevel = Number(previewLevelParam);
+      if (Number.isFinite(previewLevel)) {
+        setVoicePreviewLevel(Math.min(1, Math.max(0, previewLevel)));
+      }
+    }
     if (
       previewState &&
       [
@@ -1060,6 +1073,7 @@ export default function Home() {
     utterance.rate = 0.98;
     utterance.pitch = 1;
     utterance.onstart = () => {
+      voiceBoundaryRef.current = { charIndex: 0, elapsedMs: 0 };
       setSpeaking(true);
       setVoiceCaption(concise);
       setVoiceOutputLevel(0.34);
@@ -1072,15 +1086,31 @@ export default function Home() {
           .catch(() => undefined);
     };
     utterance.onboundary = (event) => {
-      const pulse = 0.26 + ((event.charIndex * 37) % 53) / 100;
-      setVoiceOutputLevel(Math.min(0.82, pulse));
+      const elapsedMs = event.elapsedTime * 1000;
+      const charDelta = Math.max(
+        1,
+        event.charIndex - voiceBoundaryRef.current.charIndex,
+      );
+      const timeDelta = Math.max(
+        45,
+        elapsedMs - voiceBoundaryRef.current.elapsedMs,
+      );
+      const cadence = Math.min(1, (charDelta / timeDelta) * 42);
+      const punctuation = /[,.!?;:]/.test(concise[event.charIndex - 1] || '');
+      const pulse = Math.max(
+        0.2,
+        Math.min(0.82, 0.28 + cadence * 0.46 - (punctuation ? 0.09 : 0)),
+      );
+      voiceBoundaryRef.current = { charIndex: event.charIndex, elapsedMs };
+      setVoiceOutputLevel(pulse);
       window.clearTimeout(voicePulseTimer.current);
       voicePulseTimer.current = window.setTimeout(
-        () => setVoiceOutputLevel(0.18),
-        95,
+        () => setVoiceOutputLevel(punctuation ? 0.11 : 0.17),
+        punctuation ? 150 : 105,
       );
     };
     utterance.onend = () => {
+      voiceBoundaryRef.current = { charIndex: 0, elapsedMs: 0 };
       setSpeaking(false);
       setVoiceOutputLevel(0);
       if (agentToken)
@@ -1096,6 +1126,7 @@ export default function Home() {
     recognitionRef.current = null;
     speechSynthesis?.cancel();
     window.clearTimeout(voicePulseTimer.current);
+    voiceBoundaryRef.current = { charIndex: 0, elapsedMs: 0 };
     setListening(false);
     setSpeaking(false);
     setVoiceOutputLevel(0);
@@ -2729,8 +2760,13 @@ export default function Home() {
         state={voiceEyeState}
         transcript={prompt}
         caption={voiceCaption}
-        outputLevel={voicePreviewState === 'speaking' ? 0.58 : voiceOutputLevel}
+        outputLevel={
+          voicePreviewState === 'speaking'
+            ? (voicePreviewLevel ?? 0.58)
+            : voiceOutputLevel
+        }
         preview={voicePreviewState !== null}
+        previewLevel={voicePreviewLevel ?? undefined}
         onListen={() => {
           setVoiceOutput(true);
           startVoice();

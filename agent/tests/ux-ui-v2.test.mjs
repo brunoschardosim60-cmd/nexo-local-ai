@@ -62,6 +62,10 @@ test('Living Eye exposes its complete state machine and biological motion', () =
   assert.match(livingEye, /LIVING_EYE_TRANSITIONS/);
   assert.match(styles, /nexo-living-eye-blink-double/);
   assert.match(livingEye, /requestAnimationFrame/);
+  assert.match(livingEye, /nexo-living-eye-lid-upper/);
+  assert.match(livingEye, /bezierCurveTo/);
+  assert.match(livingEye, /STATE_ENERGY/);
+  assert.match(styles, /living-eye-wake/);
 });
 
 test('Living Eye measures real microphone energy and applies smoothing', () => {
@@ -70,4 +74,9 @@ test('Living Eye measures real microphone energy and applies smoothing', () => {
   assert.match(livingEye, /getFloatTimeDomainData/);
   assert.match(livingEye, /Math\.sqrt\(sum \/ samples\.length\)/);
   assert.match(livingEye, /echoCancellation: true/);
+  assert.match(livingEye, /noiseFloor/);
+  assert.match(livingEye, /rawEnergy < 0\.025/);
+  assert.match(page, /event\.elapsedTime/);
+  assert.match(page, /voiceBoundaryRef/);
+  assert.match(page, /voice-eye-level/);
 });

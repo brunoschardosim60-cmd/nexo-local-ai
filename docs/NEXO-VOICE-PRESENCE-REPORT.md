@@ -51,6 +51,8 @@ Os estados estão em `docs/voice-presence/screenshots/`: `idle`, `listening`, `u
 
 A segunda direção visual preserva toda a arquitetura comportamental e substitui apenas a presença orgânica. O globo ficou maior e vítreo para expor a rede interna da referência; o centro continua quase preto, sem pupila humana limpa. As bordas do asset agora desaparecem gradualmente no ambiente, em vez de formar um quadrado arredondado. A camada circular de pupila e o Canvas radial foram reduzidos para que as ramificações anatômicas do olho sejam a leitura dominante. Os prompts e as referências usados nesta revisão estão documentados em `docs/voice-presence/WHALE-EYE-V2-PROMPTS.md`.
 
+O refinamento comportamental seguinte — auditoria, blink com pálpebras reais, estados diferenciados, rede procedural orgânica, noise floor e validação responsiva — está documentado em `docs/NEXO-LIVING-EYE-REFINEMENT-2.md`.
+
 ## VIDEO/GIF DE TESTE
 
 O navegador integrado disponível nesta execução não expõe gravação de vídeo. Não foi produzido um GIF falso a partir de frames estáticos. O comportamento foi validado ao vivo, e as capturas por estado foram mantidas como regressão visual.
