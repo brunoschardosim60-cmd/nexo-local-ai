@@ -1,5 +1,6 @@
 export type MessageKind = 'text' | 'sheet' | 'image' | 'video' | 'audio' | 'action' | 'task' | 'unavailable';
-export type LocalAttachment = { type: 'image' | 'audio' | 'video'; name: string; mimeType: string; dataUrl: string };
+export type LocalAttachment = { type: 'image' | 'audio' | 'video' | 'screen' | 'camera'; name: string; mimeType: string; dataUrl: string };
+export type PresenceState = { active: boolean; listening: boolean; viewingScreen: boolean; cameraActive: boolean; thinking: boolean; speaking: boolean; mode: string; startedAt?: string | null };
 export type MediaArtifact = { id: string; type: 'image' | 'video' | 'audio'; mimeType: string; provider: string; model?: string | null; metadata?: Record<string, unknown> };
 export type Effort = 'Baixo' | 'Médio' | 'Alto' | 'Extra alto';
 export type ChatMessage = {
@@ -97,6 +98,7 @@ export type AgentHealth = {
       knowledge?: { engine: string; entities: number; relations: number; maxTraversalDepth: number };
       continuity?: { engine: string; persistentHandoffs: boolean; projectAware: boolean };
       personal?: Record<string, unknown>; personalWork?: Record<string, unknown>; study?: Record<string, unknown>; proactivity?: Record<string, unknown>; personalSearch?: Record<string, unknown>;
+      multimodal?: Record<string, unknown>; providers?: Record<string, unknown>; perception?: Record<string, unknown>; presence?: Record<string, unknown>; vad?: Record<string, unknown>;
       visualVerification?: boolean;
       vision?: Record<string, unknown>; image?: Record<string, unknown>; video?: Record<string, unknown>; audio?: Record<string, unknown>; mediaQueue?: Record<string, unknown>;
     };

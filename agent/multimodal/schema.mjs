@@ -1,19 +1,12 @@
 import { randomUUID } from 'node:crypto';
 
-export const INPUT_TYPES = Object.freeze(['text', 'image', 'audio', 'video', 'document', 'screen']);
+export const MODALITIES = Object.freeze(['text', 'image', 'audio', 'video', 'document', 'screen', 'camera']);
+export const INPUT_TYPES = MODALITIES;
 export const ARTIFACT_TYPES = Object.freeze(['text', 'code', 'image', 'video', 'audio', 'document', 'dataset', 'web']);
-
-export function normalizeMultimodalMessage(input = {}) {
-  const parts = Array.isArray(input.parts) ? input.parts : typeof input.content === 'string' ? [{ type: 'text', text: input.content }] : [];
-  const normalized = parts.slice(0, 12).map((part, index) => {
-    const type = String(part?.type || ''); if (!INPUT_TYPES.includes(type)) throw new Error(`Parte multimodal inválida: ${type || index}.`);
-    if (type === 'text') return { id: part.id || randomUUID(), type, text: String(part.text || '').slice(0, 12_000) };
-    const source = part.path ? { path: String(part.path) } : part.dataUrl ? { dataUrl: String(part.dataUrl) } : part.url ? { url: String(part.url) } : null;
-    if (!source) throw new Error(`Parte ${type} sem origem.`);
-    return { id: part.id || randomUUID(), type, mimeType: part.mimeType ? String(part.mimeType) : null, name: part.name ? String(part.name).slice(0, 240) : null, ...source, metadata: part.metadata && typeof part.metadata === 'object' ? part.metadata : {} };
-  });
-  return { id: input.id || randomUUID(), role: ['user', 'assistant', 'tool'].includes(input.role) ? input.role : 'user', parts: normalized, createdAt: input.createdAt || new Date().toISOString() };
-}
-
-export function textFromMessage(message) { return normalizeMultimodalMessage(message).parts.filter(part => part.type === 'text').map(part => part.text).join('\n'); }
+const COLLECTIONS = Object.freeze({ text: 'text', image: 'images', audio: 'audio', video: 'videos', document: 'documents', screen: 'screenFrames', camera: 'cameraFrames' });
+function source(part) { return part.path ? { path: String(part.path) } : part.dataUrl ? { dataUrl: String(part.dataUrl) } : part.url ? { url: String(part.url) } : part.artifactId ? { artifactId: String(part.artifactId) } : null; }
+function mediaPart(part, type, index) { const origin = source(part); if (!origin) throw new Error(`Parte ${type} sem origem.`); return { id: part.id || randomUUID(), type, mimeType: part.mimeType ? String(part.mimeType).slice(0, 120) : null, name: part.name ? String(part.name).slice(0, 240) : null, ...origin, region: part.region || null, timestampMs: Number.isFinite(part.timestampMs) ? Number(part.timestampMs) : null, metadata: part.metadata && typeof part.metadata === 'object' ? part.metadata : {}, index }; }
+export function normalizeMultimodalMessage(input = {}) { const hasParts=Array.isArray(input.parts);const legacy = hasParts ? input.parts : typeof input.content === 'string' ? [{ type: 'text', text: input.content }] : []; const explicit = hasParts?[]:MODALITIES.flatMap(type => { const value = input[COLLECTIONS[type]]; if (type === 'text') return Array.isArray(value) ? value.map(item => typeof item === 'string' ? { type, text: item } : { ...item, type }) : []; return Array.isArray(value) ? value.map(item => ({ ...item, type })) : []; }); const parts = [...legacy, ...explicit].slice(0, 32).map((part, index) => { const type = String(part?.type || ''); if (!MODALITIES.includes(type)) throw new Error(`Parte multimodal inválida: ${type || index}.`); if (type === 'text') return { id: part.id || randomUUID(), type, text: String(part.text || '').slice(0, 12_000), index }; return mediaPart(part, type, index); }); const grouped = Object.fromEntries(Object.values(COLLECTIONS).map(key => [key, []])); for (const part of parts) grouped[COLLECTIONS[part.type]].push(part.type === 'text' ? part.text : part); return { id: input.id || randomUUID(), role: ['user','assistant','tool'].includes(input.role) ? input.role : 'user', ...grouped, metadata: input.metadata && typeof input.metadata === 'object' ? input.metadata : {}, parts, createdAt: input.createdAt || new Date().toISOString() }; }
+export function textFromMessage(message) { return normalizeMultimodalMessage(message).text.join('\n'); }
 export function mediaFromMessage(message) { return normalizeMultimodalMessage(message).parts.filter(part => part.type !== 'text'); }
+export function createObservation(input = {}) { if (!MODALITIES.includes(input.modality)) throw new Error('Modalidade de observação inválida.'); if (!input.source) throw new Error('Observação sem origem verificável.'); return { id: input.id || randomUUID(), modality: input.modality, source: String(input.source).slice(0, 500), timestamp: input.timestamp || new Date().toISOString(), content: String(input.content || '').slice(0, 24_000), confidence: Math.max(0, Math.min(1, Number(input.confidence) || 0)), bounds: input.bounds || null, artifactId: input.artifactId || null, sessionId: input.sessionId || null, metadata: input.metadata && typeof input.metadata === 'object' ? input.metadata : {} }; }

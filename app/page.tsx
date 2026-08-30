@@ -28,6 +28,7 @@ import { Textarea } from '@/components/ui/textarea';
 import { NexoMark } from '@/components/nexo-mark';
 import { AgentTaskCard } from '@/components/nexo/agent-task-card';
 import { PersonalWorkspace } from '@/components/nexo/personal-workspace';
+import { PresenceControls } from '@/components/nexo/presence-controls';
 
 type Weather = { label: string; temperature: number; apparent: number; wind: number; code: number };
 type WeatherApiResponse = { current: { temperature_2m: number; apparent_temperature: number; wind_speed_10m: number; weather_code: number } };
@@ -250,6 +251,7 @@ export default function Home() {
   const [mounted, setMounted] = useState(false);
   const [mode, setMode] = useState('Geral');
   const [effort, setEffort] = useState<Effort>('Médio');
+  const [imageQuality, setImageQuality] = useState<'FAST' | 'BALANCED' | 'HIGH' | 'MAX'>('BALANCED');
   const [prompt, setPrompt] = useState('');
   const [loading, setLoading] = useState(false);
   const [activityLabel, setActivityLabel] = useState('Preparando a resposta…');
@@ -490,14 +492,14 @@ export default function Home() {
     const speechWindow = window as SpeechWindow;
     const Recognition = speechWindow.SpeechRecognition || speechWindow.webkitSpeechRecognition;
     if (!Recognition) { setNotice('O reconhecimento de voz não está disponível neste navegador.'); return; }
-    const recognition = new Recognition(); recognition.lang = 'pt-BR'; recognition.interimResults = false;
+    speechSynthesis?.cancel();if(agentToken)void new NexoClient(agentToken).updatePresence({action:'barge-in'}).catch(()=>undefined);const recognition = new Recognition(); recognition.lang = 'pt-BR'; recognition.interimResults = false;
     recognition.onstart = () => setListening(true); recognition.onend = () => setListening(false); recognition.onerror = () => setListening(false);
     recognition.onresult = event => setPrompt(event.results[0][0].transcript); recognition.start();
   }
 
   function speak(text: string) {
     if (!voiceOutput || !('speechSynthesis' in window)) return;
-    speechSynthesis.cancel(); const utterance = new SpeechSynthesisUtterance(text); utterance.lang = 'pt-BR'; speechSynthesis.speak(utterance);
+    const concise=text.replace(/```[\s\S]*?```/g,' código disponível na tela ').replace(/[#*`>_-]/g,'').split(/\n\n/).slice(0,2).join(' ').slice(0,650);speechSynthesis.cancel(); const utterance = new SpeechSynthesisUtterance(concise); utterance.lang = 'pt-BR';utterance.rate=.98;utterance.pitch=1;utterance.onstart=()=>{if(agentToken)void new NexoClient(agentToken).updatePresence({action:'update',patch:{speaking:true,listening:false}}).catch(()=>undefined);};utterance.onend=()=>{if(agentToken)void new NexoClient(agentToken).updatePresence({action:'update',patch:{speaking:false}}).catch(()=>undefined);};speechSynthesis.speak(utterance);
   }
 
   function download(content: string, filename: string, type: string) {
@@ -609,7 +611,7 @@ export default function Home() {
       let responseTextV3 = ''; let firstTokenV3: number | undefined; let modelLabelV3 = 'Nexo Runtime V4';
       const immediate = await new NexoClient(agentToken).streamChat({
         question, mode: effectiveModeV3, effort, profile, history: baseChat.messages, documents, attachments: requestAttachments, webSearch,
-        weather: weather ? { ...weather, description: weatherDescription(weather.code) } : null,
+        weather: weather ? { ...weather, description: weatherDescription(weather.code) } : null,imageQuality,
       }, event => {
         if (event.type === 'meta') {
           modelLabelV3 = event.model;
@@ -760,11 +762,12 @@ export default function Home() {
                     {EFFORTS.map(item => <NativeSelectOption key={item} value={item}>{item}</NativeSelectOption>)}
                   </NativeSelect>
                 </div>
+                {mode==='Imagens'&&<NativeSelect size="sm" aria-label="Qualidade da imagem" value={imageQuality} onChange={event=>setImageQuality(event.target.value as typeof imageQuality)}>{['FAST','BALANCED','HIGH','MAX'].map(item=><NativeSelectOption key={item} value={item}>{item}</NativeSelectOption>)}</NativeSelect>}
               </div>
-              {(documents.length > 0 || attachments.length > 0) && <div className="mb-2 flex flex-wrap gap-1.5">{documents.map((doc, index) => <Badge key={`${doc.name}-${index}`} variant="secondary" className="h-7 gap-1.5 px-2.5"><FileText />{doc.name}<button aria-label={`Remover ${doc.name}`} onClick={() => setDocuments(items => items.filter((_, itemIndex) => itemIndex !== index))}><X className="size-3" /></button></Badge>)}{attachments.map((item, index) => <Badge key={`${item.name}-${index}`} variant="secondary" className="h-7 gap-1.5 px-2.5">{item.type === 'image' ? <ImageIcon /> : item.type === 'video' ? <Film /> : <Mic />}{item.name}<button aria-label={`Remover ${item.name}`} onClick={() => setAttachments(items => items.filter((_, itemIndex) => itemIndex !== index))}><X className="size-3" /></button></Badge>)}</div>}
+              {(documents.length > 0 || attachments.length > 0) && <div className="mb-2 flex flex-wrap gap-1.5">{documents.map((doc, index) => <Badge key={`${doc.name}-${index}`} variant="secondary" className="h-7 gap-1.5 px-2.5"><FileText />{doc.name}<button aria-label={`Remover ${doc.name}`} onClick={() => setDocuments(items => items.filter((_, itemIndex) => itemIndex !== index))}><X className="size-3" /></button></Badge>)}{attachments.map((item, index) => <Badge key={`${item.name}-${index}`} variant="secondary" className="h-7 gap-1.5 px-2.5">{['image','screen','camera'].includes(item.type) ? <ImageIcon /> : item.type === 'video' ? <Film /> : <Mic />}{item.name}<button aria-label={`Remover ${item.name}`} onClick={() => setAttachments(items => items.filter((_, itemIndex) => itemIndex !== index))}><X className="size-3" /></button></Badge>)}</div>}
               <div className="composer rounded-[20px] border border-border p-2 shadow-[0_18px_55px_rgb(0_0_0/18%)] focus-within:border-primary/30">
                 <Textarea value={prompt} onChange={event => setPrompt(event.target.value)} onKeyDown={event => { if (event.key === 'Enter' && !event.shiftKey) { event.preventDefault(); void askNexo(); } }} placeholder={mode === 'Planilhas' ? 'Descreva a planilha que precisa…' : mode === 'Imagens' ? 'Descreva a imagem que quer gerar…' : mode === 'Vídeos' ? 'Descreva um vídeo curto…' : mode === 'Programar' ? 'Descreva o código avançado…' : mode === 'Agente' ? 'Descreva a alteração no projeto…' : 'Pode falar do seu jeito…'} className="min-h-14 max-h-32 resize-none border-0 bg-transparent px-2.5 py-2 text-sm shadow-none focus-visible:ring-0" />
-                <div className="flex items-center justify-between gap-2"><div className="flex min-w-0 items-center gap-0.5"><input ref={fileInput} className="hidden" type="file" multiple accept=".txt,.md,.json,.csv,.js,.ts,.tsx,.jsx,.py,.html,.css,.xml,.yaml,.yml,.log,image/*,audio/*,video/*" onChange={addDocuments} /><Button size="icon-sm" variant="ghost" aria-label="Anexar arquivo" onClick={() => fileInput.current?.click()}><Paperclip /></Button><Button size="icon-sm" variant={listening ? 'secondary' : 'ghost'} className={listening ? 'text-rose-400' : ''} aria-label="Falar" onClick={startVoice}>{listening ? <MicOff /> : <Mic />}</Button><Button size="icon-sm" variant={voiceOutput ? 'secondary' : 'ghost'} aria-label="Ler respostas em voz alta" onClick={() => { setVoiceOutput(value => !value); speechSynthesis?.cancel(); }}>{voiceOutput ? <Volume2 /> : <VolumeX />}</Button><Button size="sm" variant={webSearch ? 'secondary' : 'ghost'} className={webSearch ? 'text-primary' : 'text-muted-foreground'} onClick={() => setWebSearch(value => !value)}><Search /><span className="hidden sm:inline">{webSearch ? 'Web ligada' : 'Pesquisar'}</span></Button><Button size="icon-sm" variant="ghost" aria-label="Pesquisar no Google" title="Pesquisar no Google em uma nova aba" onClick={openGoogleSearch}><Globe2 /></Button></div><Button size="icon" className="rounded-xl" onClick={() => void askNexo()} disabled={!prompt.trim() || loading} aria-label="Enviar"><ArrowUp /></Button></div>
+                <div className="flex items-center justify-between gap-2"><div className="flex min-w-0 items-center gap-0.5"><input ref={fileInput} className="hidden" type="file" multiple accept=".txt,.md,.json,.csv,.js,.ts,.tsx,.jsx,.py,.html,.css,.xml,.yaml,.yml,.log,image/*,audio/*,video/*" onChange={addDocuments} /><Button size="icon-sm" variant="ghost" aria-label="Anexar arquivo" onClick={() => fileInput.current?.click()}><Paperclip /></Button><PresenceControls token={agentToken} onCapture={attachment=>setAttachments(items=>[...items,attachment].slice(-4))} onNotice={setNotice}/><Button size="icon-sm" variant={listening ? 'secondary' : 'ghost'} className={listening ? 'text-rose-400' : ''} aria-label="Falar" onClick={startVoice}>{listening ? <MicOff /> : <Mic />}</Button><Button size="icon-sm" variant={voiceOutput ? 'secondary' : 'ghost'} aria-label="Ler respostas em voz alta" onClick={() => { setVoiceOutput(value => !value); speechSynthesis?.cancel(); }}>{voiceOutput ? <Volume2 /> : <VolumeX />}</Button><Button size="sm" variant={webSearch ? 'secondary' : 'ghost'} className={webSearch ? 'text-primary' : 'text-muted-foreground'} onClick={() => setWebSearch(value => !value)}><Search /><span className="hidden sm:inline">{webSearch ? 'Web ligada' : 'Pesquisar'}</span></Button><Button size="icon-sm" variant="ghost" aria-label="Pesquisar no Google" title="Pesquisar no Google em uma nova aba" onClick={openGoogleSearch}><Globe2 /></Button></div><Button size="icon" className="rounded-xl" onClick={() => void askNexo()} disabled={!prompt.trim() || loading} aria-label="Enviar"><ArrowUp /></Button></div>
               </div>
               {notice && <p className="mt-2 text-center text-xs text-amber-600 dark:text-amber-300">{notice}</p>}
               <p className="mt-2 text-center text-[10px] text-muted-foreground">O Nexo pode cometer erros. Confirme informações importantes.</p>

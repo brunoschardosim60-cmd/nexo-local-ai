@@ -35,11 +35,13 @@ O Core 7 registra as tools dinamicamente. A inteligência de código usa AST Typ
 
 O V7 adiciona o painel **Meu dia** e a paleta `Ctrl+K`. Objetivos, tarefas, prazos, projetos conhecidos, estudo e eventos observáveis ficam separados da personalidade. Proatividade e notificações começam desligadas; `SUGGEST`, `ASK` e `ACT` são políticas distintas, e `ACT` exige confirmação explícita mais capabilities limitadas. Modo foco, quiet hours, orçamento de interrupções, repetição espaçada e briefs são controlados pelo usuário. O Nexo não afirma ter “visto” algo sem evento, tool ou memória que sustente a afirmação.
 
+O V8 formaliza mensagens com texto, imagens, áudio, vídeo, documentos, frames de tela/câmera e metadata. O Modality Router combina engines, enquanto o Perception Engine preserva origem, horário e confiança de cada observação. O botão de presença reúne voz, captura pontual de tela e câmera sob consentimento explícito, exibe indicadores ativos e oferece kill switch. Frames iguais são ignorados e frames brutos não entram automaticamente na memória. Image V2 possui presets `FAST/BALANCED/HIGH/MAX`, intenção visual, edição/variações/inpainting quando Forge suporta e histórico por proveniência. Video V2 possui storyboard e projeto estruturado, mas geração e compreensão temporal continuam indisponíveis sem provider local real. Web Speech permanece apenas fallback e não é apresentado como realtime voice completo.
+
 O V6 não salva toda conversa indiscriminadamente. O Memory Gate V2 avalia utilidade, novidade, estabilidade, confiança, escopo, sensibilidade e duplicação. “Lembre que…” cria memória explícita; “esqueça…” exclui a correspondência encontrada. A central **Memória do Nexo** permite pesquisar, editar, confirmar, arquivar e apagar registros. Contradições preservam as duas evidências ou marcam a anterior como `SUPERSEDED`; nunca são sobrescritas silenciosamente. RAG usa hash de conteúdo e chunks guiados por estrutura para não reindexar arquivos inalterados.
 
 Quando o trabalho realmente pode ser dividido, `agents.delegate` cria de duas a quatro subtarefas vinculadas à tarefa principal. Elas são executadas em paralelo pelo runtime e cada especialista mantém seus próprios passos, limites, eventos, checkpoints e pedidos de permissão.
 
-Veja a arquitetura-base em [`docs/NEXO-CORE.md`](docs/NEXO-CORE.md), a auditoria da V5 em [`docs/NEXO-V5-REPORT.md`](docs/NEXO-V5-REPORT.md), o relatório do V6 em [`docs/NEXO-V6-REPORT.md`](docs/NEXO-V6-REPORT.md) e o relatório do V7 em [`docs/NEXO-V7-REPORT.md`](docs/NEXO-V7-REPORT.md).
+Veja a arquitetura-base em [`docs/NEXO-CORE.md`](docs/NEXO-CORE.md) e os relatórios honestos em `docs/NEXO-V*-REPORT.md`, incluindo [`docs/NEXO-V8-REPORT.md`](docs/NEXO-V8-REPORT.md).
 
 ## Requisitos
 
@@ -80,6 +82,7 @@ npm run eval:memory-long
 npm run eval:false-memory
 npm run eval:knowledge
 npm run eval:personal
+npm run eval:multimodal
 npm run benchmark:memory
 npm run benchmark:v4
 npm run benchmark:v5

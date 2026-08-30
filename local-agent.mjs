@@ -93,6 +93,16 @@ const server = createServer(async (request, response) => {
     if (request.method === 'GET' && url.pathname === '/agent/models/profiles') return send(response, 200, { ok: true, profiles: await core.profiles.refresh(), resources: core.resources.snapshot() });
     if (request.method === 'GET' && url.pathname === '/agent/media/jobs') return send(response, 200, { ok: true, jobs: core.mediaQueue.list(Math.min(Number(url.searchParams.get('limit')) || 30, 100)) });
     if (request.method === 'GET' && url.pathname === '/agent/artifacts') return send(response, 200, { ok: true, artifacts: core.artifacts.list(Math.min(Number(url.searchParams.get('limit')) || 30, 100)) });
+    if (request.method === 'GET' && url.pathname === '/agent/multimodal/providers') {
+      const availability = {
+        vision: await core.vision.availability(),
+        image: await core.image.availability(),
+        audio: await core.audio.availability(),
+        video: await core.video.availability(),
+      };
+      return send(response, 200, { ok: true, providers: core.providerRegistry.list(), capabilities: core.providerRegistry.health(), availability });
+    }
+    if (request.method === 'GET' && url.pathname === '/agent/presence') return send(response, 200, { ok: true, presence: core.presence.snapshot(), perception: core.perception.health() });
     if (request.method === 'GET' && url.pathname === '/agent/personal/dashboard') {
       const settings = core.personal.store.getSettings();
       const today = core.personal.work.dailyContext(new Date(), { persist: settings.dailyBriefEnabled });
@@ -133,6 +143,14 @@ const server = createServer(async (request, response) => {
     if (request.method !== 'POST') return send(response, 404, { error: 'Rota não encontrada.' });
 
     const input = await readBody(request);
+    if (url.pathname === '/agent/multimodal/route') return send(response, 200, { ok: true, route: core.modalityRouter.route(input.message || input) });
+    if (url.pathname === '/agent/perception/observe') { const result = await core.perception.observe(input.message || input, input.options || {}); audit('perception_observe', result.route.modalities.join(','), true, `${result.observations.length} observações`); return send(response, 200, { ok: true, result }); }
+    if (url.pathname === '/agent/perception/session') { const session = input.action === 'stop' ? core.perception.stopSession(input.sessionId) : core.perception.startSession(input); audit(`perception_${input.action || 'start'}`, session?.id || input.sessionId, true); return send(response, 200, { ok: true, session }); }
+    if (url.pathname === '/agent/presence') { const presence = input.action === 'stop' ? core.presence.stop() : input.action === 'barge-in' ? core.presence.bargeIn() : input.action === 'update' ? core.presence.update(input.patch || {}) : core.presence.start(input); audit(`presence_${input.action || 'start'}`, 'local', true, presence.mode); return send(response, 200, { ok: true, presence }); }
+    if (url.pathname === '/agent/presence/kill') { const presence = core.presence.stop(); audit('presence_kill', 'microphone+screen+camera', true); return send(response, 200, { ok: true, presence }); }
+    if (url.pathname === '/agent/image/edit') { const availability=await core.image.availability();if(!availability.available)return send(response,200,mediaUnavailable('image',availability));const job=core.mediaQueue.enqueue('image',{...input,mode:input.mode||'image-to-image'},{priority:input.priority||3});return send(response,202,{ok:true,job,content:'Edição adicionada à fila local.'}); }
+    if (url.pathname === '/agent/video/storyboard') return send(response, 200, { ok: true, storyboard: core.video.storyboard(input) });
+    if (url.pathname === '/agent/video/understand') return send(response, 200, { ok: true, result: await core.video.understand(input) });
     const personalGoalMatch = url.pathname.match(/^\/agent\/personal\/goals\/([^/]+)$/);
     const personalTaskMatch = url.pathname.match(/^\/agent\/personal\/tasks\/([^/]+)$/);
     const personalSuggestionMatch = url.pathname.match(/^\/agent\/personal\/suggestions\/([^/]+)$/);
@@ -156,12 +174,11 @@ const server = createServer(async (request, response) => {
       const attachments = Array.isArray(input.attachments) ? input.attachments.slice(0, 4) : [];
       const requestedImage = input.mode === 'Imagens';
       const requestedVideo = input.mode === 'Vídeos';
-      if (requestedImage) { const availability = await core.image.availability(); if (!availability.available) return send(response, 200, mediaUnavailable('image', availability)); const job = core.mediaQueue.enqueue('image', { prompt: input.question, aspectRatio: input.aspectRatio, verify: true }, { priority: 3 }); return send(response, 202, { ok: true, kind: 'media', route: 'media', mediaKind: 'image', job, content: 'Imagem adicionada à fila local.', model: 'Nexo Image' }); }
+      if (requestedImage) { const availability = await core.image.availability(); if (!availability.available) return send(response, 200, mediaUnavailable('image', availability));const attached=attachments.find(item=>item.type==='image');const previous=[...(input.history||[])].reverse().find(item=>item.artifact?.type==='image')?.artifact;const previousArtifact=previous?core.artifacts.get(previous.id):null;const sourceImage=attached?{dataUrl:attached.dataUrl}:previousArtifact?{path:previousArtifact.location,artifactId:previousArtifact.id}:null;const editing=Boolean(sourceImage)&&/edite|mude|troque|remova|adicione|mais |menos |realista|fundo|luz|ilumina|upscale|varia/i.test(input.question); const job = core.mediaQueue.enqueue('image', { prompt: input.question, aspectRatio: input.aspectRatio, quality:input.imageQuality||'BALANCED',verify:true,...(editing?{mode:'image-to-image',sourceImage,parentArtifactId:previousArtifact?.id||null}:{}) }, { priority: 3 }); return send(response, 202, { ok: true, kind: 'media', route: 'media', mediaKind: 'image', job, content: editing?'Edição adicionada à fila local usando a imagem anterior.':'Imagem adicionada à fila local.', model: 'Nexo Image V2' }); }
       if (requestedVideo) { const availability = await core.video.availability(); if (!availability.available) return send(response, 200, mediaUnavailable('video', availability)); const job = core.mediaQueue.enqueue('video', { prompt: input.question, durationSeconds: input.durationSeconds }, { priority: 5 }); return send(response, 202, { ok: true, kind: 'media', route: 'media', mediaKind: 'video', job, content: 'Vídeo adicionado à fila local.', model: 'Nexo Video' }); }
-      if (attachments.some(item => item.type === 'image')) {
-        const analyses = [];
-        for (const attachment of attachments.filter(item => item.type === 'image')) { const result = await core.vision.analyzeImage({ dataUrl: attachment.dataUrl }, `Analise a imagem anexada para responder à pergunta do usuário: ${String(input.question).slice(0, 2000)}. Separe fatos visíveis de inferências.`); analyses.push({ name: attachment.name || 'imagem', content: result.content }); }
-        input.documents = [...(Array.isArray(input.documents) ? input.documents : []), ...analyses.map(item => ({ name: `Análise visual: ${item.name}`, content: item.content }))];
+      if (attachments.some(item => ['image','screen','camera'].includes(item.type))) {
+        const perceptual=await core.perception.observe({role:'user',parts:[{type:'text',text:input.question},...attachments.filter(item=>['image','screen','camera'].includes(item.type)).map(item=>({...item,dataUrl:item.dataUrl}))]},{instruction:`Responda ao pedido: ${String(input.question).slice(0,2000)}. Preserve a origem de cada observação.`});
+        input.documents = [...(Array.isArray(input.documents) ? input.documents : []), {name:'Percepção multimodal V2',content:perceptual.summary}];
         input.attachments = [];
       }
       const prepared = await core.runtime.prepare(input); audit('runtime_chat', prepared.route, true, prepared.kind);

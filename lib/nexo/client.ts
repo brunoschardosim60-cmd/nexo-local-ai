@@ -1,4 +1,4 @@
-import type { AgentHealth, AgentTask, BackgroundJob, Chat, ChatMessage, Effort, LocalAttachment, LocalDocument, MediaArtifact, MediaJob, NexoMemory, NexoSkill, PersonalDashboard, PersonalGoal, PersonalSearchResult, PersonalSettings, PersonalSuggestion, PersonalTask, RuntimeEvent, RuntimeImmediateResponse, RuntimeStreamEvent, UserProfile } from './types';
+import type { AgentHealth, AgentTask, BackgroundJob, Chat, ChatMessage, Effort, LocalAttachment, LocalDocument, MediaArtifact, MediaJob, NexoMemory, NexoSkill, PersonalDashboard, PersonalGoal, PersonalSearchResult, PersonalSettings, PersonalSuggestion, PersonalTask, PresenceState, RuntimeEvent, RuntimeImmediateResponse, RuntimeStreamEvent, UserProfile } from './types';
 
 export const NEXO_AGENT_URL = 'http://127.0.0.1:7331';
 
@@ -16,7 +16,7 @@ export class NexoClient {
   async createTask(objective: string, options: { maxSteps: number; maxRetries: number }) {
     return (await jsonResponse<{ task: AgentTask }>(await fetch(`${this.baseUrl}/agent/tasks`, { method: 'POST', headers: this.headers(true), body: JSON.stringify({ objective, ...options }) }))).task;
   }
-  async streamChat(input: { question: string; mode: string; effort: Effort; profile: UserProfile; history: ChatMessage[]; documents: LocalDocument[]; attachments?: LocalAttachment[]; weather?: Record<string, unknown> | null; webSearch: boolean }, onEvent: (event: RuntimeStreamEvent) => void, signal?: AbortSignal) {
+  async streamChat(input: { question: string; mode: string; effort: Effort; profile: UserProfile; history: ChatMessage[]; documents: LocalDocument[]; attachments?: LocalAttachment[]; weather?: Record<string, unknown> | null; webSearch: boolean; imageQuality?: 'FAST'|'BALANCED'|'HIGH'|'MAX' }, onEvent: (event: RuntimeStreamEvent) => void, signal?: AbortSignal) {
     const response = await fetch(`${this.baseUrl}/chat`, { method: 'POST', headers: this.headers(true), body: JSON.stringify(input), signal });
     const contentType = response.headers.get('content-type') || '';
     if (contentType.includes('application/json')) return jsonResponse<RuntimeImmediateResponse>(response);
@@ -76,6 +76,10 @@ export class NexoClient {
   async updateSuggestion(id: string, status: 'SEEN' | 'DISMISSED' | 'ACTED') { return (await jsonResponse<{ suggestion: PersonalSuggestion }>(await fetch(`${this.baseUrl}/agent/personal/suggestions/${id}`, { method: 'POST', headers: this.headers(true), body: JSON.stringify({ status }) }))).suggestion; }
   async personalSearch(query: string, scope = 'global') { return (await jsonResponse<{ results: PersonalSearchResult[] }>(await fetch(`${this.baseUrl}/agent/personal/search?q=${encodeURIComponent(query)}&scope=${encodeURIComponent(scope)}`, { headers: this.headers() }))).results; }
   async personalScan() { return jsonResponse<{ events: RuntimeEvent[]; suggestions: PersonalSuggestion[] }>(await fetch(`${this.baseUrl}/agent/personal/scan`, { method: 'POST', headers: this.headers(true), body: '{}' })); }
+  async presence() { return jsonResponse<{ presence: PresenceState }>(await fetch(`${this.baseUrl}/agent/presence`, { headers: this.headers() })); }
+  async updatePresence(input: Record<string, unknown>) { return (await jsonResponse<{ presence: PresenceState }>(await fetch(`${this.baseUrl}/agent/presence`, { method: 'POST', headers: this.headers(true), body: JSON.stringify(input) }))).presence; }
+  async killPresence() { return (await jsonResponse<{ presence: PresenceState }>(await fetch(`${this.baseUrl}/agent/presence/kill`, { method: 'POST', headers: this.headers(true), body: '{}' }))).presence; }
+  async mediaProviders() { return jsonResponse(await fetch(`${this.baseUrl}/agent/multimodal/providers`, { headers: this.headers() })); }
   async clearPersonal(target: 'goals' | 'activity' | 'learning') { return jsonResponse(await fetch(`${this.baseUrl}/agent/personal/clear`, { method: 'POST', headers: this.headers(true), body: JSON.stringify({ target, confirmation: 'CLEAR' }) })); }
   async warmRuntime(effort: Effort) { return jsonResponse(await fetch(`${this.baseUrl}/agent/runtime/warm`, { method: 'POST', headers: this.headers(true), body: JSON.stringify({ effort }) })); }
   async getMediaJob(id: string) { return (await jsonResponse<{ job: MediaJob }>(await fetch(`${this.baseUrl}/agent/media/jobs/${id}`, { headers: this.headers() }))).job; }

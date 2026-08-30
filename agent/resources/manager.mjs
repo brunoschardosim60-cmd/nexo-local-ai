@@ -10,7 +10,7 @@ function gpuSnapshot() {
 }
 
 export function createResourceManager({ profiles = null } = {}) {
-  let activeHeavy = null; const gpu = gpuSnapshot();
+  let activeHeavy = null; const gpu = gpuSnapshot();const lifecycle=new Map();const queue=[];
   function snapshot() {
     return { cpu: { cores: cpus().length, model: cpus()[0]?.model || null }, ram: { totalMB: Math.round(totalmem() / 1_048_576), freeMB: Math.round(freemem() / 1_048_576) }, gpu, activeHeavy, loadedModels: profiles?.health?.().loaded || [] };
   }
@@ -23,5 +23,7 @@ export function createResourceManager({ profiles = null } = {}) {
   }
   function acquire(job) { activeHeavy = { ...job, at: new Date().toISOString() }; return activeHeavy; }
   function release(id) { if (!id || activeHeavy?.id === id) activeHeavy = null; }
-  return { snapshot, decide, acquire, release, health: () => ({ ...snapshot(), policies: ['allow', 'queue', 'fallback', 'reject'] }) };
+  function model(action,modelName,{keepWarmSeconds=45}={}){if(!['load','keep-warm','unload','swap'].includes(action))throw new Error('Ação de ciclo de modelo inválida.');if(action==='unload')lifecycle.delete(modelName);else lifecycle.set(modelName,{model:modelName,state:action==='load'?'loaded':action,keepWarmSeconds,updatedAt:new Date().toISOString()});return[...lifecycle.values()];}
+  function enqueue(item){queue.push({...item,queuedAt:new Date().toISOString()});queue.sort((a,b)=>(a.realtime?-1:0)-(b.realtime?-1:0)||a.priority-b.priority);return queue.at(-1);}
+  return { snapshot, decide, acquire, release,model,enqueue,queue:()=>queue.slice(), health: () => ({ ...snapshot(),version:'2.0.0',policies: ['allow', 'queue', 'fallback', 'reject'],modelLifecycle:['load','keep-warm','unload','swap'],gpuQueue:true,realtimePriority:true,lifecycle:[...lifecycle.values()],queued:queue.length }) };
 }

@@ -23,7 +23,8 @@ export function createMediaQueue({ database, resourceManager, handlers = {}, con
       }).finally(() => { controllers.delete(current.id); resourceManager.release(current.id); running -= 1; schedule(); });
     }
   }
-  function enqueue(kind, input, { priority = 5 } = {}) { const job = database.createMediaJob({ kind, priority, input }); pending.push(job); publish(job); schedule(); return job; }
+  function phase(job){return job?{...job,phase:job.status==='queued'?'QUEUED':job.status==='running'?'GENERATING':job.status==='completed'?'DONE':job.status==='cancelled'?'CANCELLED':'FAILED',progress:null}:job;}
+  function enqueue(kind, input, { priority = 5 } = {}) { const effective=kind==='tts'?Math.min(priority,1):priority;const job = database.createMediaJob({ kind, priority:effective, input }); pending.push(job); publish(phase(job)); schedule(); return phase(job); }
   function cancel(id) {
     const job = database.getMediaJob(id); if (!job) throw new Error('Job de mídia não encontrado.');
     if (['completed', 'failed', 'cancelled'].includes(job.status)) return job;
@@ -31,5 +32,5 @@ export function createMediaQueue({ database, resourceManager, handlers = {}, con
     return publish(database.updateMediaJob(id, { status: 'cancelled', cancelledAt: new Date().toISOString(), error: 'Cancelado pelo usuário.' }));
   }
   function setHandler(kind, handler) { handlers[kind] = handler; }
-  return { enqueue, cancel, get: database.getMediaJob, list: database.listMediaJobs, setHandler, subscribe(listener) { events.on('job', listener); return () => events.off('job', listener); }, health: () => ({ concurrency, running, queued: pending.length, kinds: Object.keys(handlers) }) };
+  return { enqueue, cancel(id){return phase(cancel(id));}, get(id){return phase(database.getMediaJob(id));}, list(limit){return database.listMediaJobs(limit).map(phase);}, setHandler, subscribe(listener) { events.on('job', listener); return () => events.off('job', listener); }, health: () => ({ version:'2.0.0',concurrency, running, queued: pending.length, kinds: Object.keys(handlers),honestProgress:['QUEUED','PREPARING','GENERATING','VERIFYING','DONE'],numericProgress:false,realtimePriority:true,cancellable:true }) };
 }
