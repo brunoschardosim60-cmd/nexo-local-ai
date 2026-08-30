@@ -1,0 +1,27 @@
+'use client';
+
+import { Bot, Check, Pause, Play, RefreshCw, ShieldCheck, X } from 'lucide-react';
+import { Badge } from '@/components/ui/badge';
+import { Button } from '@/components/ui/button';
+import { taskStatusLabel, type AgentPermission, type AgentTask } from '@/lib/nexo/types';
+
+export function AgentTaskCard({ task, busy, onPermission, onControl, onRefresh }: {
+  task: AgentTask; busy: boolean;
+  onPermission: (permission: AgentPermission, decision: 'approved' | 'denied') => void;
+  onControl: (action: 'pause' | 'resume' | 'cancel') => void; onRefresh: () => void;
+}) {
+  const completed = task.plan.filter(step => step.status === 'completed').length;
+  const progress = task.plan.length ? Math.round((completed / task.plan.length) * 100) : 0;
+  const pendingPermission = task.permissions.find(permission => permission.status === 'pending');
+  const terminal = ['completed', 'completed_with_warnings', 'failed', 'cancelled'].includes(task.status);
+  const active = ['planning', 'running'].includes(task.status);
+  return <div className="min-w-[270px] space-y-4 sm:min-w-[470px]">
+    <div className="flex items-start justify-between gap-3"><div><div className="flex items-center gap-2 text-primary"><Bot className="size-4" /><span className="text-[10px] font-semibold uppercase tracking-[.14em]">Tarefa autônoma</span></div><p className="mt-2 font-medium leading-5">{task.objective}</p></div><Badge variant={task.status === 'failed' ? 'destructive' : terminal ? 'secondary' : 'outline'}>{taskStatusLabel(task.status)}</Badge></div>
+    <div><div className="mb-1.5 flex justify-between text-[10px] text-muted-foreground"><span>{completed} de {task.plan.length} etapas</span><span>{task.stepsUsed}/{task.maxSteps} passos</span></div><div className="h-1.5 overflow-hidden rounded-full bg-muted"><div className="h-full rounded-full bg-primary transition-all" style={{ width: `${progress}%` }} /></div></div>
+    <div className="space-y-1.5">{task.plan.map((step, stepIndex) => <div key={step.id} className={`rounded-xl border px-3 py-2 ${stepIndex === task.currentStep && active ? 'border-primary/25 bg-primary/7' : 'border-border bg-muted/25'}`}><div className="flex items-start gap-2"><span className={`mt-1.5 size-2 shrink-0 rounded-full ${step.status === 'completed' ? 'bg-emerald-500' : step.status === 'failed' ? 'bg-rose-500' : step.status === 'awaiting_approval' ? 'bg-amber-400' : stepIndex === task.currentStep && active ? 'bg-primary animate-pulse' : 'bg-muted-foreground/30'}`} /><div><p className="text-xs font-medium">{stepIndex + 1}. {step.title}</p><p className="mt-0.5 text-[10px] leading-4 text-muted-foreground">{step.description}</p>{step.assignedAgent && step.assignedAgent !== 'general' && <p className="mt-1 text-[9px] uppercase tracking-wide text-muted-foreground">{step.assignedAgent}</p>}{step.action && <p className="mt-1 font-mono text-[9px] text-primary/80">{step.action.tool}</p>}</div></div></div>)}</div>
+    {pendingPermission && <div className="rounded-xl border border-amber-400/25 bg-amber-400/7 p-3"><div className="flex items-center gap-2 text-amber-600 dark:text-amber-300"><ShieldCheck className="size-4" /><span className="text-xs font-semibold">Aprovação necessária</span></div><p className="mt-2 text-xs">{pendingPermission.reason}</p><p className="mt-1 break-all font-mono text-[10px] text-muted-foreground">{pendingPermission.tool} · {pendingPermission.scope}</p><div className="mt-3 flex gap-2"><Button size="sm" disabled={busy} onClick={() => onPermission(pendingPermission, 'approved')}><Check /> Aprovar e continuar</Button><Button size="sm" variant="outline" disabled={busy} onClick={() => onPermission(pendingPermission, 'denied')}><X /> Negar</Button></div></div>}
+    {task.result?.summary && <div className={`rounded-xl border p-3 ${task.result.validated ? 'border-emerald-500/20 bg-emerald-500/6' : 'border-amber-500/20 bg-amber-500/6'}`}><p className={`text-xs font-semibold ${task.result.validated ? 'text-emerald-600 dark:text-emerald-300' : 'text-amber-600 dark:text-amber-300'}`}>{task.result.validated ? 'Resultado verificado' : 'Resultado com alertas'}</p><p className="mt-1 text-xs leading-5">{task.result.summary}</p>{task.result.evidence?.length ? <ul className="mt-2 list-disc space-y-1 pl-4 text-[10px] text-muted-foreground">{task.result.evidence.map(item => <li key={item}>{item}</li>)}</ul> : null}{task.result.remainingRisks?.length ? <ul className="mt-2 list-disc space-y-1 pl-4 text-[10px] text-amber-600 dark:text-amber-300">{task.result.remainingRisks.map(item => <li key={item}>{item}</li>)}</ul> : null}</div>}
+    {task.error && <p className="rounded-xl bg-destructive/10 p-3 text-xs text-destructive">{task.error}</p>}
+    <div className="flex flex-wrap items-center justify-between gap-2"><p className="text-[10px] text-muted-foreground">Nexo Core · {task.graph?.length ?? task.plan.length} nós · {task.checkpoints?.length ?? 0} checkpoints · {task.events.length} eventos</p><div className="flex flex-wrap gap-1">{active && <Button size="sm" variant="ghost" disabled={busy} onClick={() => onControl('pause')}><Pause /> Pausar</Button>}{task.status === 'paused' && <Button size="sm" variant="ghost" disabled={busy} onClick={() => onControl('resume')}><Play /> Retomar</Button>}{!terminal && <Button size="sm" variant="ghost" disabled={busy} onClick={() => onControl('cancel')}><X /> Cancelar</Button>}<Button size="sm" variant="ghost" disabled={busy} onClick={onRefresh}><RefreshCw /> Atualizar</Button></div></div>
+  </div>;
+}

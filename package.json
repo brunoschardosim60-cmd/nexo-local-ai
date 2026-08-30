@@ -8,6 +8,7 @@
   "scripts": {
     "dev": "vinext dev",
     "agent": "node local-agent.mjs",
+    "test:agent": "node --test agent/tests/*.test.mjs",
     "build": "vinext build",
     "start": "wrangler dev --config dist/server/wrangler.json",
     "lint": "oxlint",

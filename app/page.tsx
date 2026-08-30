@@ -5,10 +5,16 @@ import { ChangeEvent, type ReactNode, useEffect, useMemo, useRef, useState } fro
 import {
   ArrowUp, Bot, Check, Clock3, CloudSun, Code2, Copy, Download, Gauge,
   FilePenLine, FileText, FolderPlus, Globe2, ImageIcon, Library, Menu, Mic, MicOff,
-  Moon, Network, Paperclip, Plus, Search, Server, Settings2, ShieldCheck, Sparkles,
+  Moon, Network, Paperclip, Plus, RefreshCw, Search, Server, Settings2, ShieldCheck, Sparkles,
   Sun, Table2, Trash2, Volume2, VolumeX, X,
 } from 'lucide-react';
 import Image from 'next/image';
+import { useNexoTaskSync } from '@/hooks/use-nexo-task-sync';
+import { NexoClient, NEXO_AGENT_URL } from '@/lib/nexo/client';
+import {
+  parseAgentTask, taskStatusLabel, type AgentHealth, type AgentPermission, type AgentTask,
+  type Chat, type ChatMessage, type Effort, type LocalDocument, type MessageKind, type NexoAction, type UserProfile,
+} from '@/lib/nexo/types';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import {
@@ -20,16 +26,8 @@ import { ScrollArea } from '@/components/ui/scroll-area';
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from '@/components/ui/sheet';
 import { Textarea } from '@/components/ui/textarea';
 import { NexoMark } from '@/components/nexo-mark';
+import { AgentTaskCard } from '@/components/nexo/agent-task-card';
 
-type MessageKind = 'text' | 'sheet' | 'image' | 'action';
-type Effort = 'Baixo' | 'Médio' | 'Alto' | 'Extra alto';
-type ChatMessage = {
-  role: 'user' | 'assistant'; content: string; kind?: MessageKind;
-  elapsedMs?: number; firstTokenMs?: number; effort?: Effort; model?: string;
-};
-type Chat = { id: string; title: string; messages: ChatMessage[]; updatedAt: number };
-type LocalDocument = { name: string; content: string };
-type UserProfile = { name: string; city: string; style: string; instructions: string };
 type Weather = { label: string; temperature: number; apparent: number; wind: number; code: number };
 type WeatherApiResponse = { current: { temperature_2m: number; apparent_temperature: number; wind_speed_10m: number; weather_code: number } };
 type GeocodingApiResponse = { results?: Array<{ name: string; admin1?: string; latitude: number; longitude: number }> };
@@ -47,21 +45,10 @@ type SpeechWindow = Window & {
   SpeechRecognition?: new () => LocalSpeechRecognition;
   webkitSpeechRecognition?: new () => LocalSpeechRecognition;
 };
-type NexoAction = {
-  type: 'write_file' | 'create_folder' | 'read_file' | 'list_files' | 'create_project';
-  path: string; content?: string; template?: 'static-site' | 'node-api' | 'python-api' | 'ai-service'; reason: string;
-  status?: 'pending' | 'completed' | 'failed'; result?: string; output?: string;
-};
-type AgentHealth = {
-  sessionToken: string;
-  workspace: string;
-  security: { loopbackOnly: boolean; authenticatedSession: boolean; rateLimitPerMinute: number; auditEntries: number };
-  network: { interfaces: Array<{ name: string; vpn: boolean }>; vpnDetected: boolean };
-};
 
 const MODEL = 'qwen2.5-coder:7b-instruct-q3_K_S';
 const FAST_MODEL = 'qwen2.5-coder:3b';
-const AGENT_URL = 'http://127.0.0.1:7331';
+const AGENT_URL = NEXO_AGENT_URL;
 const EFFORTS: Effort[] = ['Baixo', 'Médio', 'Alto', 'Extra alto'];
 
 const MODES = [
@@ -94,6 +81,26 @@ function cleanSvg(content: string) {
   return /<svg\b[^>]*\bxmlns=/i.test(sanitized)
     ? sanitized
     : sanitized.replace(/^<svg\b/i, '<svg xmlns="http://www.w3.org/2000/svg"');
+}
+
+function hasDetailedVisual(svg: string) {
+  const shapes = svg.match(/<(?:path|circle|ellipse|rect|polygon|polyline|line)\b/gi)?.length ?? 0;
+  const organicShapes = svg.match(/<(?:path|circle|ellipse|polygon|polyline)\b/gi)?.length ?? 0;
+  const textElements = svg.match(/<text\b/gi)?.length ?? 0;
+  return shapes >= 8 && organicShapes >= 3 && !(textElements > 0 && shapes < 12);
+}
+
+function imageSubjectGuide(prompt: string) {
+  const normalized = normalizeInput(prompt);
+  if (/\bmouse\b/.test(normalized) && !/\b(rato|camundongo|animal)\b/.test(normalized)) {
+    return 'O objeto é um MOUSE DE COMPUTADOR, visto de cima em perspectiva: corpo curvo ergonômico, botões esquerdo e direito separados, roda de rolagem central, detalhe lateral e sombra. Ele deve ser reconhecível sem nenhuma palavra.';
+  }
+  if (/\b(gato|gatinho)\b/.test(normalized)) return 'Desenhe um gato reconhecível com cabeça, orelhas triangulares, olhos, focinho, corpo, patas, cauda curva e sombra; não use texto.';
+  if (/\b(cachorro|cao|dog)\b/.test(normalized)) return 'Desenhe um cachorro reconhecível com cabeça, focinho, orelhas, corpo, quatro patas, cauda e sombra; não use texto.';
+  if (/\b(carro|automovel)\b/.test(normalized)) return 'Desenhe um carro reconhecível em perspectiva, com carroceria, para-brisa, janelas, faróis, rodas completas, reflexos e sombra; não use texto.';
+  if (/\b(casa|lar)\b/.test(normalized)) return 'Desenhe uma casa reconhecível com telhado, paredes, porta, janelas, profundidade, terreno e sombra; não use texto.';
+  if (/\b(celular|smartphone|telefone)\b/.test(normalized)) return 'Desenhe um smartphone reconhecível em perspectiva, com corpo, tela, câmeras, botões, reflexos e sombra; não use texto.';
+  return 'Represente visualmente o objeto ou a cena com silhueta clara, profundidade, detalhes característicos, iluminação e sombra. A imagem deve ser compreensível sem texto.';
 }
 
 function normalizeInput(value: string) {
@@ -139,11 +146,14 @@ function escapeXml(value: string) {
 function fallbackSvg(prompt: string) {
   const normalized = normalizeInput(prompt);
   const isNotebook = /\b(note|notebook|laptop|computador)\b/.test(normalized);
+  const isComputerMouse = /\bmouse\b/.test(normalized) && !/\b(rato|camundongo|animal)\b/.test(normalized);
   const title = escapeXml(prompt.slice(0, 54) || 'Criação do Nexo');
-  const subject = isNotebook
+  const subject = isComputerMouse
+    ? `<g transform="translate(512 430)"><ellipse cx="18" cy="238" rx="238" ry="64" fill="#07091a" opacity=".55"/><path d="M4-284C-122-282-224-178-228-42l-3 126c-4 180 91 294 235 294S243 264 239 84l-3-126C232-178 130-282 4-284Z" fill="url(#mouseBody)" stroke="#b9aeff" stroke-width="11"/><path d="M4-277V-54" fill="none" stroke="#a89cff" stroke-width="8" opacity=".8"/><path d="M-214-45C-146-7-72 9 4 9S154-7 222-45" fill="none" stroke="#33267e" stroke-width="8"/><rect x="-25" y="-151" width="58" height="116" rx="29" fill="#12162f" stroke="#7df4dd" stroke-width="7"/><rect x="-8" y="-128" width="24" height="58" rx="12" fill="#baff78"/><path d="M-172 87C-133 149-76 181 4 181S141 149 180 87" fill="none" stroke="#8a78ef" stroke-width="6" opacity=".7"/><rect x="-220" y="58" width="18" height="82" rx="9" fill="#7df4dd"/><rect x="202" y="58" width="18" height="82" rx="9" fill="#7df4dd"/><circle cx="4" cy="257" r="12" fill="#c8ff7c"/><path d="M4 269c0 86 81 74 81 152 0 51-37 77-87 77" fill="none" stroke="#9f91ef" stroke-width="10" stroke-linecap="round"/></g>`
+    : isNotebook
     ? `<g transform="translate(142 210)"><rect x="62" y="16" width="616" height="420" rx="34" fill="#11142a" stroke="#9f8cff" stroke-width="14"/><rect x="94" y="50" width="552" height="352" rx="16" fill="url(#screen)"/><circle cx="370" cy="34" r="6" fill="#d8d0ff"/><path d="M18 448h704l82 92c12 14 2 36-17 36H-47c-19 0-29-22-17-36l82-92Z" fill="#dad7ee"/><path d="M270 469h200l28 38H242l28-38Z" fill="#aaa5c5"/><rect x="-26" y="540" width="788" height="18" rx="9" fill="#7363d5"/></g>`
     : `<g transform="translate(512 430)"><circle r="238" fill="url(#orb)" opacity=".95"/><path d="M-208 76C-92-122 60-170 212-58C96-48 8 24-38 164C-92 122-150 92-208 76Z" fill="#c9ff72" opacity=".88"/><circle cx="112" cy="-108" r="76" fill="#fff" opacity=".78"/></g>`;
-  return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" role="img" aria-label="${title}"><defs><linearGradient id="bg" x1="0" y1="0" x2="1" y2="1"><stop stop-color="#0c1025"/><stop offset="1" stop-color="#37266c"/></linearGradient><linearGradient id="screen" x1="0" y1="0" x2="1" y2="1"><stop stop-color="#6847e8"/><stop offset=".52" stop-color="#27c7d7"/><stop offset="1" stop-color="#b9ff73"/></linearGradient><radialGradient id="orb"><stop stop-color="#9a84ff"/><stop offset=".58" stop-color="#4f37c8"/><stop offset="1" stop-color="#171b49"/></radialGradient><filter id="glow"><feGaussianBlur stdDeviation="28"/></filter></defs><rect width="1024" height="1024" rx="72" fill="url(#bg)"/><circle cx="770" cy="190" r="130" fill="#745cff" opacity=".26" filter="url(#glow)"/>${subject}<rect x="96" y="828" width="832" height="110" rx="30" fill="#080b1c" opacity=".66"/><text x="512" y="875" fill="#fff" text-anchor="middle" font-family="Arial, sans-serif" font-size="28" font-weight="700">CRIADO LOCALMENTE PELO NEXO</text><text x="512" y="912" fill="#cbc5eb" text-anchor="middle" font-family="Arial, sans-serif" font-size="19">${title}</text></svg>`;
+  return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" role="img" aria-label="${title}"><defs><linearGradient id="bg" x1="0" y1="0" x2="1" y2="1"><stop stop-color="#0c1025"/><stop offset="1" stop-color="#37266c"/></linearGradient><linearGradient id="screen" x1="0" y1="0" x2="1" y2="1"><stop stop-color="#6847e8"/><stop offset=".52" stop-color="#27c7d7"/><stop offset="1" stop-color="#b9ff73"/></linearGradient><linearGradient id="mouseBody" x1="0" y1="0" x2="1" y2="1"><stop stop-color="#8170ee"/><stop offset=".48" stop-color="#4e3bb5"/><stop offset="1" stop-color="#211b58"/></linearGradient><radialGradient id="orb"><stop stop-color="#9a84ff"/><stop offset=".58" stop-color="#4f37c8"/><stop offset="1" stop-color="#171b49"/></radialGradient><filter id="glow"><feGaussianBlur stdDeviation="28"/></filter></defs><rect width="1024" height="1024" rx="72" fill="url(#bg)"/><circle cx="770" cy="190" r="130" fill="#745cff" opacity=".26" filter="url(#glow)"/>${subject}<rect x="96" y="828" width="832" height="110" rx="30" fill="#080b1c" opacity=".66"/><text x="512" y="875" fill="#fff" text-anchor="middle" font-family="Arial, sans-serif" font-size="28" font-weight="700">CRIADO LOCALMENTE PELO NEXO</text><text x="512" y="912" fill="#cbc5eb" text-anchor="middle" font-family="Arial, sans-serif" font-size="19">${title}</text></svg>`;
 }
 
 function weatherDescription(code: number) {
@@ -318,10 +328,23 @@ export default function Home() {
     const updateClock = () => setCurrentTime(new Intl.DateTimeFormat('pt-BR', { dateStyle: 'full', timeStyle: 'short' }).format(new Date()));
     updateClock(); const timer = window.setInterval(updateClock, 30_000);
     if (storedProfile.city) void loadWeatherByCity(storedProfile.city);
-    fetch(`${AGENT_URL}/health`).then(async response => {
-      if (!response.ok) throw new Error('agent');
-      const data = await response.json() as AgentHealth;
+    new NexoClient().health().then(async (data: AgentHealth) => {
       setAgentOnline(true); setAgentToken(data.sessionToken); setAgentHealth(data);
+      const payload = await new NexoClient(data.sessionToken).getSession();
+      if (payload) {
+        const remoteChats = payload.session?.state?.chats ?? [];
+        if (remoteChats.length) {
+          const merged = new Map<string, Chat>();
+          for (const chat of [...initialChats, ...remoteChats]) {
+            const existing = merged.get(chat.id);
+            if (!existing || chat.updatedAt > existing.updatedAt) merged.set(chat.id, chat);
+          }
+          const restored = [...merged.values()].sort((a, b) => b.updatedAt - a.updatedAt).slice(0, 40);
+          setChats(restored); setActiveChatId(current => current || restored[0]?.id || '');
+          localStorage.setItem('nexo-chats', JSON.stringify(restored));
+        }
+        if (payload.session?.state?.profile) setProfile(current => ({ ...current, ...payload.session!.state!.profile }));
+      }
     }).catch(() => { setAgentOnline(false); setAgentToken(''); setAgentHealth(null); });
     const warmup = window.setTimeout(() => {
       void fetch('http://localhost:11434/api/generate', {
@@ -336,6 +359,8 @@ export default function Home() {
     messagesEnd.current?.scrollIntoView({ behavior: 'smooth' });
   }, [history.length, loading]);
 
+  useNexoTaskSync({ chats, setChats, token: agentToken, profile, setOnline: setAgentOnline });
+
   function persistChats(next: Chat[]) {
     const limited = next
       .map(chat => ({ ...chat, messages: chat.messages.slice(-80) }))
@@ -343,6 +368,21 @@ export default function Home() {
       .slice(0, 40);
     setChats(limited);
     try { localStorage.setItem('nexo-chats', JSON.stringify(limited)); } catch { setNotice('A memória local está cheia. Exclua chats antigos.'); }
+    syncAgentSession(limited, profile);
+  }
+
+  function syncAgentSession(nextChats: Chat[], nextProfile: UserProfile) {
+    if (!agentToken) return;
+    void new NexoClient(agentToken).saveSession(nextChats, nextProfile).catch(() => undefined);
+  }
+
+  function rememberExchange(question: string, answer: string) {
+    if (!agentToken || question.length + answer.length < 120) return;
+    const preference = /(eu gosto|eu prefiro|sempre|nunca|meu projeto|meu objetivo|lembre|importante para mim)/i.test(question);
+    void new NexoClient(agentToken).remember(`Usuário: ${question}\nNexo: ${answer.slice(0, 4000)}`, {
+      kind: preference ? 'user' : 'episodic', importance: preference ? 0.85 : 0.55, confidence: preference ? 0.86 : 0.65,
+      source: 'conversation', metadata: { chatId: activeChatId },
+    }).catch(() => undefined);
   }
 
   function createChat() {
@@ -387,6 +427,7 @@ export default function Home() {
 
   function saveProfile() {
     localStorage.setItem('nexo-profile', JSON.stringify(profile)); setProfileOpen(false);
+    syncAgentSession(chats, profile);
     if (profile.city) void loadWeatherByCity(profile.city);
   }
 
@@ -412,6 +453,9 @@ export default function Home() {
       try { accepted.push({ name: file.name, content: (await file.text()).slice(0, 40_000) }); } catch { setNotice(`Não consegui ler ${file.name}.`); }
     }
     setDocuments(current => [...current, ...accepted].slice(-8)); event.target.value = '';
+    if (agentToken) for (const document of accepted) {
+      void new NexoClient(agentToken).indexText(`upload:${document.name}`, document.content, { uploadedFromBrowser: true, trust: 'untrusted' }).catch(() => undefined);
+    }
   }
 
   async function searchKnowledge(query: string) {
@@ -545,6 +589,44 @@ export default function Home() {
     finally { setActionLoading(false); }
   }
 
+  function updateTaskMessage(messageIndex: number, task: AgentTask) {
+    if (!activeChat) return;
+    const messages = activeChat.messages.map((message, index) => index === messageIndex ? { ...message, content: JSON.stringify(task), kind: 'task' as const } : message);
+    const updated = { ...activeChat, messages, updatedAt: Date.now() };
+    persistChats([updated, ...chats.filter(chat => chat.id !== activeChat.id)]);
+  }
+
+  async function decideTaskPermission(messageIndex: number, task: AgentTask, permission: AgentPermission, decision: 'approved' | 'denied') {
+    if (!agentToken || actionLoading) return;
+    setActionLoading(true); setNotice(decision === 'approved' ? 'Ação aprovada. O agente retomou a tarefa…' : 'Ação negada.');
+    try {
+      const nextTask = await new NexoClient(agentToken).decidePermission(task.id, permission.id, decision);
+      updateTaskMessage(messageIndex, nextTask);
+      setNotice(nextTask.status === 'awaiting_approval' ? 'O agente precisa de uma nova aprovação.' : `Tarefa: ${taskStatusLabel(nextTask.status)}.`);
+    } catch (error) { setNotice(error instanceof Error ? error.message : 'O agente local não respondeu.'); }
+    finally { setActionLoading(false); }
+  }
+
+  async function refreshAgentTask(messageIndex: number, taskId: string) {
+    if (!agentToken || actionLoading) return;
+    setActionLoading(true);
+    try {
+      const task = await new NexoClient(agentToken).getTask(taskId);
+      updateTaskMessage(messageIndex, task); setNotice('Estado da tarefa atualizado.');
+    } catch (error) { setNotice(error instanceof Error ? error.message : 'Não consegui atualizar a tarefa.'); }
+    finally { setActionLoading(false); }
+  }
+
+  async function controlAgentTask(messageIndex: number, taskId: string, action: 'pause' | 'resume' | 'cancel') {
+    if (!agentToken || actionLoading) return;
+    setActionLoading(true);
+    try {
+      const task = await new NexoClient(agentToken).controlTask(taskId, action); updateTaskMessage(messageIndex, task);
+      setNotice(action === 'pause' ? 'Tarefa pausada e salva em checkpoint.' : action === 'resume' ? 'Tarefa retomada do estado persistido.' : 'Tarefa cancelada.');
+    } catch (error) { setNotice(error instanceof Error ? error.message : 'Não consegui controlar a tarefa.'); }
+    finally { setActionLoading(false); }
+  }
+
   async function askNexo() {
     const question = prompt.trim();
     if (!question || loading) return;
@@ -559,16 +641,29 @@ export default function Home() {
     persistChats([pendingChat, ...chats.filter(chat => chat.id !== baseChat.id)]); setActiveChatId(baseChat.id);
 
     try {
+      if (mode === 'Agente') {
+        if (!agentOnline || !agentToken) throw new Error('O agente local está offline. Inicie o Nexo novamente.');
+        setActivityLabel('Planejando e executando a tarefa local…');
+        const task = await new NexoClient(agentToken).createTask(question, { maxSteps: effort === 'Baixo' ? 6 : effort === 'Médio' ? 10 : 14, maxRetries: effort === 'Baixo' ? 1 : 2 });
+        const elapsedMs = performance.now() - requestStarted;
+        const completeChat = { ...pendingChat, messages: [...pendingChat.messages, { role: 'assistant' as const, content: JSON.stringify(task), kind: 'task' as const, elapsedMs, firstTokenMs: elapsedMs, effort, model: 'Nexo Core' }], updatedAt: Date.now() };
+        persistChats([completeChat, ...chats.filter(chat => chat.id !== baseChat.id)]);
+        setNotice(task.status === 'awaiting_approval' ? 'O agente preparou o próximo passo e aguarda sua aprovação.' : `Tarefa: ${taskStatusLabel(task.status)}.`);
+        return;
+      }
       const instant = quickAnswer(question);
       if (instant) {
         const elapsedMs = performance.now() - requestStarted;
         const completeChat = { ...pendingChat, messages: [...pendingChat.messages, { role: 'assistant' as const, content: instant, kind: 'text' as const, elapsedMs, firstTokenMs: elapsedMs, effort, model: 'Resposta rápida' }], updatedAt: Date.now() };
-        persistChats([completeChat, ...chats.filter(chat => chat.id !== baseChat.id)]); speak(instant); return;
+        persistChats([completeChat, ...chats.filter(chat => chat.id !== baseChat.id)]); rememberExchange(question, instant); speak(instant); return;
       }
       const effectiveMode = mode === 'Imagens' || isImageCreationRequest(question, baseChat.messages) ? 'Imagens' : mode;
-      if (effectiveMode === 'Imagens' && /\b(note|notebook|laptop|computador)\b/.test(normalizeInput(question))) {
+      const normalizedImageQuestion = normalizeInput(question);
+      const hasInstantImageTemplate = /\b(note|notebook|laptop|computador)\b/.test(normalizedImageQuestion)
+        || (/\bmouse\b/.test(normalizedImageQuestion) && !/\b(rato|camundongo|animal)\b/.test(normalizedImageQuestion));
+      if (effectiveMode === 'Imagens' && hasInstantImageTemplate) {
         const elapsedMs = performance.now() - requestStarted;
-        const completeChat = { ...pendingChat, messages: [...pendingChat.messages, { role: 'assistant' as const, content: fallbackSvg(question), kind: 'image' as const, elapsedMs, firstTokenMs: elapsedMs, effort, model: 'Gerador SVG' }], updatedAt: Date.now() };
+        const completeChat = { ...pendingChat, messages: [...pendingChat.messages, { role: 'assistant' as const, content: fallbackSvg(question), kind: 'image' as const, elapsedMs, firstTokenMs: elapsedMs, effort, model: 'Gerador SVG', sourcePrompt: question }], updatedAt: Date.now() };
         persistChats([completeChat, ...chats.filter(chat => chat.id !== baseChat.id)]); return;
       }
       const onlineContext = await searchKnowledge(question);
@@ -576,7 +671,7 @@ export default function Home() {
       const modeInstruction = effectiveMode === 'Planilhas'
         ? 'Crie CSV válido com cabeçalhos claros e ponto e vírgula como separador. Responda somente o CSV.'
         : effectiveMode === 'Imagens'
-          ? 'Crie uma imagem vetorial bonita, reconhecível e bem composta em SVG, com viewBox="0 0 1024 1024". Use formas, gradientes e cores coerentes; não use scripts nem imagens externas. Responda SOMENTE com o SVG completo, iniciando em <svg e terminando em </svg>. Interprete português informal pelo contexto: em um pedido de imagem, “note” significa notebook/laptop, salvo se o usuário disser anotação.'
+          ? `Crie uma imagem vetorial bonita, reconhecível e bem composta em SVG, com viewBox="0 0 1024 1024". ${imageSubjectGuide(question)} Use no mínimo 10 formas visuais relevantes entre path, circle, ellipse, rect e polygon, com profundidade, detalhes e composição central. É PROIBIDO substituir o desenho por uma palavra, legenda, janela, cartão ou retângulo genérico. Não use elemento <text>, scripts nem imagens externas. Responda SOMENTE com o SVG completo, iniciando em <svg e terminando em </svg>. Interprete português informal pelo contexto: em um pedido de imagem, “note” significa notebook/laptop, salvo se o usuário disser anotação.`
           : effectiveMode === 'Agente'
             ? 'Você pode propor UMA ferramenta por resposta e deve responder SOMENTE JSON. Formato base: {"nexo_action":{"type":"TIPO","path":"caminho/relativo","reason":"explicação curta"}}. Tipos permitidos: read_file para ler texto; list_files para listar pasta; write_file com content completo; create_folder; create_project com template static-site, node-api, python-api ou ai-service. Ao criar um site, API, servidor ou serviço de IA novo, prefira create_project. Depois use read_file/write_file em passos separados para personalizar. Nunca proponha exclusões, terminal, comandos, caminhos absolutos, registro, configurações do sistema, instalação ou mudanças de VPN. Toda escrita e criação exigem aprovação humana.'
             : '';
@@ -584,9 +679,9 @@ export default function Home() {
         ? `${weather.label}: ${weather.temperature}°C, sensação ${weather.apparent}°C, ${weatherDescription(weather.code)}, vento ${weather.wind} km/h.`
         : 'Clima indisponível. Explique que o usuário pode definir sua cidade no perfil; não diga que você nunca possui acesso ao clima.';
       const lightRequest = effectiveMode === 'Geral' && !documents.length && !onlineContext && question.length < 240;
-      const useFastModel = effort === 'Baixo' || (effort === 'Médio' && (lightRequest || effectiveMode === 'Imagens'));
+      const useFastModel = effort === 'Baixo' || (effort === 'Médio' && lightRequest);
       const selectedModel = useFastModel ? FAST_MODEL : MODEL;
-      const selectedModelLabel = useFastModel ? 'Qwen 3B' : 'Qwen 7B';
+      let selectedModelLabel = useFastModel ? 'Qwen 3B' : 'Qwen 7B';
       const isStructured = ['Imagens', 'Planilhas', 'Agente'].includes(effectiveMode);
       const displayStreaming = !isStructured;
       const numContext = effort === 'Baixo' ? 3072 : effort === 'Médio' ? documents.length || onlineContext ? 6144 : 4096 : effort === 'Alto' ? 6144 : 8192;
@@ -652,16 +747,39 @@ export default function Home() {
       }
       responseText = responseText.trim();
       if (!responseText) throw new Error('empty');
-      if (effectiveMode === 'Imagens') responseText = cleanSvg(responseText) || fallbackSvg(question);
+      if (effectiveMode === 'Imagens') {
+        let candidate = cleanSvg(responseText);
+        if (!hasDetailedVisual(candidate)) {
+          setActivityLabel('Refinando os detalhes da imagem…');
+          const retryModel = effort === 'Baixo' ? FAST_MODEL : MODEL;
+          const retry = await fetch('http://localhost:11434/api/chat', {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              model: retryModel, stream: false, keep_alive: '30m',
+              options: { temperature: 0.16, top_p: 0.86, repeat_penalty: 1.1, num_ctx: 4096, num_predict: effort === 'Baixo' ? 1200 : 1900 },
+              messages: [
+                { role: 'system', content: 'Você é um ilustrador SVG. Entregue somente SVG 1024x1024 seguro e completo. Desenhe o objeto de forma reconhecível usando pelo menos 12 formas, silhueta clara, detalhes, luz e sombra. Não use texto, legenda, janela, cartão ou imagem externa.' },
+                { role: 'user', content: `O primeiro desenho ficou genérico e foi rejeitado. Refaça do zero: ${question}. ${imageSubjectGuide(question)}` },
+              ],
+            }),
+          });
+          if (retry.ok) {
+            const retryData = await retry.json() as OllamaApiResponse;
+            const refined = cleanSvg(retryData.message?.content ?? '');
+            if (hasDetailedVisual(refined)) { candidate = refined; selectedModelLabel = `${retryModel === MODEL ? 'Qwen 7B' : 'Qwen 3B'} · revisado`; }
+          }
+        }
+        responseText = hasDetailedVisual(candidate) ? candidate : fallbackSvg(question);
+      }
       const proposedAction = effectiveMode === 'Agente' ? parseAction(responseText) : null;
       const kind: MessageKind = effectiveMode === 'Planilhas' ? 'sheet' : effectiveMode === 'Imagens' ? 'image' : proposedAction ? 'action' : 'text';
       if (kind === 'text') responseText = polishPortuguese(responseText);
       const elapsedMs = performance.now() - requestStarted;
-      const completeChat = { ...pendingChat, messages: [...pendingChat.messages, { role: 'assistant' as const, content: responseText, kind, elapsedMs, firstTokenMs: firstTokenMs ?? elapsedMs, effort, model: selectedModelLabel }], updatedAt: Date.now() };
+      const completeChat = { ...pendingChat, messages: [...pendingChat.messages, { role: 'assistant' as const, content: responseText, kind, elapsedMs, firstTokenMs: firstTokenMs ?? elapsedMs, effort, model: selectedModelLabel, sourcePrompt: kind === 'image' ? question : undefined }], updatedAt: Date.now() };
       persistChats([completeChat, ...chats.filter(chat => chat.id !== baseChat.id)]);
-      if (kind === 'text') speak(responseText);
-    } catch {
-      setNotice('Não consegui acessar o modelo local. Confirme se o Ollama está aberto e tente novamente.');
+      if (kind === 'text') { rememberExchange(question, responseText); speak(responseText); }
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : 'Não consegui acessar o modelo local. Confirme se o Ollama está aberto e tente novamente.');
     } finally { setLoading(false); }
   }
 
@@ -718,13 +836,16 @@ export default function Home() {
                 <p className="mx-auto mt-4 max-w-lg text-sm leading-6 text-muted-foreground">Você não precisa trazer um comando pronto. Conte uma ideia, uma dúvida ou como está seu dia — o Nexo conversa, pensa junto e também transforma isso em projetos.</p>
               </div> : <div className="space-y-5 py-2">
                 {history.map((message, index) => {
-                  const svg = message.kind === 'image' ? cleanSvg(message.content) : '';
+                  const imagePrompt = message.sourcePrompt ?? (history[index - 1]?.role === 'user' ? history[index - 1].content : '');
+                  const cleanedSvg = message.kind === 'image' ? cleanSvg(message.content) : '';
+                  const svg = message.kind === 'image' ? hasDetailedVisual(cleanedSvg) ? cleanedSvg : fallbackSvg(imagePrompt) : '';
                   const streaming = loading && index === history.length - 1 && message.role === 'assistant';
                   return <article key={`${message.role}-${index}`} className={`flex gap-3 ${message.role === 'user' ? 'justify-end' : 'justify-start'}`}>
                     {message.role === 'assistant' && <div className="nexo-logo mt-1 grid size-7 shrink-0 place-items-center rounded-lg text-white"><NexoMark className="size-4" /></div>}
                     <div className={`max-w-[88%] rounded-2xl px-4 py-3 text-sm leading-6 sm:max-w-[82%] ${message.role === 'user' ? 'rounded-br-md bg-primary text-primary-foreground' : 'assistant-message rounded-bl-md border border-border bg-card/80'}`}>
-                      {message.kind === 'image' && svg ? <><Image unoptimized width={1024} height={1024} className="aspect-square w-full rounded-xl bg-white object-contain" src={`data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}`} alt="Imagem criada pelo Nexo" /><Button className="mt-3" size="sm" variant="outline" onClick={() => download(svg, 'imagem-nexo.svg', 'image/svg+xml')}><Download /> Baixar SVG</Button></>
+                      {message.kind === 'image' && svg ? <><Image unoptimized width={1024} height={1024} className="aspect-square w-full rounded-xl bg-white object-contain" src={`data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}`} alt="Imagem criada pelo Nexo" /><div className="mt-3 flex flex-wrap gap-2"><Button size="sm" variant="outline" onClick={() => download(svg, 'imagem-nexo.svg', 'image/svg+xml')}><Download /> Baixar SVG</Button>{imagePrompt && <Button size="sm" variant="ghost" onClick={() => { setMode('Imagens'); setPrompt(`Crie uma nova versão mais detalhada de: ${imagePrompt}`); }}><RefreshCw /> Criar variação</Button>}</div></>
                         : message.kind === 'sheet' ? <><pre className="max-h-64 overflow-auto whitespace-pre-wrap font-mono text-xs">{stripFence(message.content)}</pre><Button className="mt-3" size="sm" variant="outline" onClick={() => download('\ufeff' + stripFence(message.content), 'planilha-nexo.csv', 'text/csv;charset=utf-8')}><Download /> Baixar planilha</Button></>
+                        : message.kind === 'task' && parseAgentTask(message.content) ? (() => { const task = parseAgentTask(message.content)!; return <AgentTaskCard task={task} busy={actionLoading} onPermission={(permission, decision) => void decideTaskPermission(index, task, permission, decision)} onControl={action => void controlAgentTask(index, task.id, action)} onRefresh={() => void refreshAgentTask(index, task.id)} />; })()
                         : message.kind === 'action' && parseAction(message.content) ? (() => { const action = parseAction(message.content)!; const readOnly = ['read_file', 'list_files'].includes(action.type); return <div className="min-w-[260px] space-y-3"><div className="flex items-center gap-2 text-primary"><ShieldCheck className="size-4" /><span className="text-xs font-semibold uppercase tracking-wide">{readOnly ? 'Acesso local solicitado' : 'Ação protegida'}</span></div><div><p className="font-medium">{actionTitle(action)}</p><p className="mt-1 break-all font-mono text-xs text-muted-foreground">{action.path}</p><p className="mt-2 text-xs text-muted-foreground">{action.reason}</p></div>{action.content && <pre className="max-h-32 overflow-auto rounded-lg bg-muted p-2 font-mono text-[10px]">{action.content.slice(0, 1800)}</pre>}{action.output && <pre className="max-h-40 overflow-auto whitespace-pre-wrap rounded-lg bg-muted p-2 font-mono text-[10px]">{action.output}</pre>}{action.status === 'pending' ? <Button size="sm" disabled={!agentOnline || !agentToken || actionLoading} onClick={() => void runAction(index, action)}>{action.type === 'write_file' ? <FilePenLine /> : action.type === 'create_folder' ? <FolderPlus /> : action.type === 'create_project' ? <Server /> : <Library />}{agentOnline ? actionLoading ? 'Executando…' : actionButton(action) : 'Agente local offline'}</Button> : <Badge variant={action.status === 'completed' ? 'secondary' : 'destructive'}>{action.result}</Badge>}</div>; })()
                         : message.role === 'assistant' ? <RichText content={message.content} /> : <p className="whitespace-pre-wrap">{message.content}</p>}
                       {message.role === 'assistant' && message.content && <div className="message-actions">
@@ -770,7 +891,7 @@ export default function Home() {
           <div className="flex items-center justify-between"><div><p className="text-sm font-medium">Contexto ativo</p><p className="mt-1 text-xs text-muted-foreground">O que o Nexo está usando</p></div><Button size="icon-sm" variant="ghost" onClick={() => setProfileOpen(true)}><Settings2 /></Button></div>
           <div className="mt-6 space-y-2.5">{[
             { name: 'Modelos locais', detail: `Qwen 3B/7B · esforço ${effort.toLowerCase()}`, active: true, icon: NexoMark },
-            { name: 'Agente local', detail: agentOnline ? 'Arquivos com aprovação' : 'Offline', active: agentOnline, icon: Bot },
+            { name: 'Nexo Core', detail: agentHealth?.agent ? `${agentHealth.agent.database} · ${agentHealth.agent.tasks.running} ativa(s)` : agentOnline ? 'Inicializando runtime' : 'Offline', active: !!agentHealth?.agent, icon: Bot },
             { name: 'Segurança', detail: agentHealth?.security ? `Sessão autenticada · ${agentHealth.security.rateLimitPerMinute}/min` : 'Aguardando agente', active: !!agentHealth?.security, icon: ShieldCheck },
             { name: 'Rede / VPN', detail: agentHealth?.network?.vpnDetected ? `Ativa · ${agentHealth.network.interfaces.find(item => item.vpn)?.name}` : 'Nenhuma VPN detectada', active: !!agentHealth?.network?.vpnDetected, icon: Network },
             { name: 'Perfil', detail: `${profile.name || 'Usuário'} · ${profile.style}`, active: true, icon: Check },
@@ -781,7 +902,7 @@ export default function Home() {
           ].map(item => { const Icon = item.icon; return <div key={item.name} className="rounded-2xl border border-border bg-card/55 p-3.5"><div className="flex items-center gap-3"><div className="grid size-9 shrink-0 place-items-center rounded-xl bg-muted text-muted-foreground"><Icon className="size-4" /></div><div className="min-w-0 flex-1"><p className="text-xs font-medium">{item.name}</p><p className="mt-0.5 truncate text-[11px] text-muted-foreground">{item.detail}</p></div><span className={`size-2 shrink-0 rounded-full ${item.active ? 'bg-emerald-500' : 'bg-muted-foreground/25'}`} /></div></div>; })}</div>
           {!weather && <Button className="mt-3 w-full" size="sm" variant="outline" onClick={useDeviceLocation}><CloudSun /> Usar localização</Button>}
           <Button className="mt-3 w-full" size="sm" variant="outline" onClick={() => setSecurityOpen(true)}><ShieldCheck /> Abrir central de segurança</Button>
-          <div className="mt-6 rounded-2xl border border-primary/15 bg-primary/7 p-4"><p className="text-xs font-medium text-primary">Ferramentas prontas</p><div className="mt-3 grid grid-cols-2 gap-2 text-[11px] text-muted-foreground"><span className="rounded-lg bg-muted px-2 py-1.5">Sites</span><span className="rounded-lg bg-muted px-2 py-1.5">APIs locais</span><span className="rounded-lg bg-muted px-2 py-1.5">Serviços de IA</span><span className="rounded-lg bg-muted px-2 py-1.5">Arquivos</span></div></div>
+          <div className="mt-6 rounded-2xl border border-primary/15 bg-primary/7 p-4"><p className="text-xs font-medium text-primary">Runtime cognitivo local</p><div className="mt-3 grid grid-cols-2 gap-2 text-[11px] text-muted-foreground"><span className="rounded-lg bg-muted px-2 py-1.5">Task Graph</span><span className="rounded-lg bg-muted px-2 py-1.5">Checkpoints</span><span className="rounded-lg bg-muted px-2 py-1.5">Tool contracts</span><span className="rounded-lg bg-muted px-2 py-1.5">Repository map</span><span className="rounded-lg bg-muted px-2 py-1.5">Context Engine</span><span className="rounded-lg bg-muted px-2 py-1.5">RAG local</span></div></div>
         </div></ScrollArea>
       </aside>
     </div>

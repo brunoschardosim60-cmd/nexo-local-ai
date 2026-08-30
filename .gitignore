@@ -37,3 +37,11 @@ next-env.d.ts
 /outputs/
 /work/
 *.tsbuildinfo
+
+# Nexo local runtime state
+/data/*.db
+/data/*.db-*
+/data/logs/
+/data/sessions/
+/data/vectors/
+/.nexo-backups/
