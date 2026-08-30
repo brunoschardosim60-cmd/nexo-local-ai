@@ -7,7 +7,7 @@ if (!healthResponse.ok) throw new Error(`Nexo indisponível: ${healthResponse.st
 const health = await healthResponse.json();
 const token = health.sessionToken;
 const sessionId = `conversation-live-${Date.now()}`;
-const profile = { name: '', city: '', style: 'natural', instructions: '', relationshipId: sessionId };
+const profile = { name: '', city: '', style: 'natural', instructions: '', relationshipId: sessionId, personalityLearning: false };
 const history = [];
 const transcript = [];
 

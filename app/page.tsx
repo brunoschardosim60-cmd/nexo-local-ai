@@ -173,7 +173,7 @@ const MODES = [
 const DEFAULT_PROFILE: UserProfile = {
   name: 'Bruno',
   city: '',
-  style: 'Natural, acolhedor e proativo',
+  style: 'Natural, extrovertido, curioso e proativo',
   instructions: '',
 };
 

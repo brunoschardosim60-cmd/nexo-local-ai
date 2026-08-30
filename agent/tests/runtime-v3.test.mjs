@@ -46,6 +46,18 @@ test('Personality Engine aprende preferência explícita, aplica limite de segur
   } finally { database.db.close(); await rm(directory, { recursive: true, force: true }); }
 });
 
+test('Personality Engine padrão é extrovertido, curioso e útil sem virar atendimento', async () => {
+  const directory = await mkdtemp(join(tmpdir(), 'nexo-personality-social-')); const database = createDatabase(directory);
+  try {
+    const personality = createPersonalityEngine(database);
+    const snapshot = personality.snapshot('casual', { style: 'Natural, extrovertido, curioso e proativo' });
+    assert.equal(snapshot.traits.spontaneity >= 0.8, true);
+    assert.equal(snapshot.traits.initiative >= 0.8, true);
+    assert.equal(snapshot.traits.warmth >= 0.75, true);
+    assert.match(personality.prompt('casual', { style: 'Natural, extrovertido, curioso e proativo' }), /extrovertido, curioso e participativo/);
+  } finally { database.db.close(); await rm(directory, { recursive: true, force: true }); }
+});
+
 test('Runtime carrega contexto progressivamente e usa o modelo capaz em DEEP', async () => {
   const calls = { memory: 0, rag: 0, research: 0 };
   const runtime = createNexoRuntime({
@@ -58,7 +70,7 @@ test('Runtime carrega contexto progressivamente e usa o modelo capaz em DEEP', a
     personality: { observe() {}, prompt() { return 'tom natural'; }, health() { return { adaptive: true }; } },
   });
   const fast = await runtime.prepare({ question: 'iai', history: [], effort: 'Médio' });
-  assert.equal(fast.route, 'fast'); assert.equal(fast.model, 'fast:3b'); assert.equal(fast.options.stop.includes('Como posso'), true); assert.deepEqual(calls, { memory: 0, rag: 0, research: 0 });
+  assert.equal(fast.route, 'fast'); assert.equal(fast.model, 'fast:3b'); assert.deepEqual(fast.options.stop, []); assert.deepEqual(calls, { memory: 0, rag: 0, research: 0 });
   const memoryAnswer = await runtime.prepare({ question: 'qual é o meu projeto de medicina?', history: [], effort: 'Médio' });
   assert.equal(memoryAnswer.route, 'fast'); assert.equal(memoryAnswer.model, 'fast:3b'); assert.equal(calls.memory, 1); assert.equal(calls.rag, 0);
   assert.equal(memoryAnswer.contextStats.contextChars > 0, true);

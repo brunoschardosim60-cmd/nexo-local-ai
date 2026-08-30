@@ -1,12 +1,12 @@
 const BASE_IDENTITY = Object.freeze({
-  spontaneity: 0.68,
-  humor: 0.48,
+  spontaneity: 0.8,
+  humor: 0.56,
   profanity: 0.08,
   sarcasm: 0.18,
   formality: 0.28,
-  verbosity: 0.46,
-  initiative: 0.62,
-  warmth: 0.58,
+  verbosity: 0.6,
+  initiative: 0.8,
+  warmth: 0.76,
   technicality: 0.56,
 });
 
@@ -34,6 +34,12 @@ function styleSignals(message) {
   if (/(?:pode|seja) (?:mais )?(?:informal|solto|descontra[ií]do)|fala como (?:eu|gente)/.test(text)) add('formality', 0.12, 0.92, true, 'explicit-informal');
   if (/(?:seja|fale) (?:mais )?formal|sem g[ií]ria/.test(text)) add('formality', 0.82, 0.94, true, 'explicit-formal');
   if (/(?:pode|seja) (?:mais )?(?:engra[cç]ado|espont[aâ]neo)|pode zoar|faz piada/.test(text)) { add('humor', 0.76, 0.9, true, 'explicit-humor'); add('spontaneity', 0.78, 0.86, true, 'explicit-spontaneity'); }
+  if (/(?:seja|fique|quero (?:voc[eê]|tu)) (?:mais )?(?:extrovertid|comunicativ|conversador)|puxe assunto|queira saber|demonstre curiosidade/.test(text)) {
+    add('spontaneity', 0.88, 0.94, true, 'explicit-extroversion');
+    add('initiative', 0.88, 0.94, true, 'explicit-curiosity');
+    add('warmth', 0.84, 0.9, true, 'explicit-social-warmth');
+    add('verbosity', 0.62, 0.82, true, 'explicit-conversational-length');
+  }
   if (/(?:sem|n[aã]o quero) (?:piada|humor|gracinha)|pare de zoar/.test(text)) add('humor', 0.04, 0.96, true, 'explicit-no-humor');
   if (/(?:tome|tenha) iniciativa|seja proativ|pode sugerir|traga ideias/.test(text)) add('initiative', 0.82, 0.9, true, 'explicit-initiative');
   if (/(?:s[oó] fa[cç]a|fa[cç]a apenas) o que eu pedir|sem sugest/.test(text)) add('initiative', 0.15, 0.93, true, 'explicit-low-initiative');
@@ -76,6 +82,12 @@ export function createPersonalityEngine(database) {
     if (/detalh|complet/.test(style)) traits.verbosity = Math.max(traits.verbosity, 0.7);
     if (/formal/.test(style) && !/informal/.test(style)) traits.formality = Math.max(traits.formality, 0.72);
     if (/descontra|natural|informal/.test(style)) traits.formality = Math.min(traits.formality, 0.25);
+    if (/extrovert|comunicativ|conversador|curios/.test(style)) {
+      traits.spontaneity = Math.max(traits.spontaneity, 0.82);
+      traits.initiative = Math.max(traits.initiative, 0.82);
+    }
+    if (/acolhedor|caloros|atento/.test(style)) traits.warmth = Math.max(traits.warmth, 0.78);
+    if (/proativ|iniciativa/.test(style)) traits.initiative = Math.max(traits.initiative, 0.82);
     const limits = CONTEXT_LIMITS[context] || CONTEXT_LIMITS.casual;
     for (const [trait, maximum] of Object.entries(limits)) traits[trait] = Math.min(traits[trait], maximum);
     return { context, traits, learned: [...learned.values()], observations: database.listPersonalityObservations(20) };
@@ -89,7 +101,10 @@ export function createPersonalityEngine(database) {
     const profanity = traits.profanity > 0.5 ? 'palavrões ocasionais são permitidos em conversa casual, nunca forçados' : traits.profanity > 0.18 ? 'gíria forte só se o usuário já estiver nesse tom' : 'evite palavrões';
     const initiative = traits.initiative > 0.68 ? 'tome iniciativa útil sem transformar toda resposta em pergunta' : 'não acrescente sugestões desnecessárias';
     if (compact) {
-      const tags = [tone, length, traits.humor > 0.62 ? 'humor livre' : traits.humor < 0.15 ? 'sem humor' : 'humor leve', traits.profanity > 0.5 ? 'palavrão só se natural' : 'sem palavrão', traits.initiative > 0.68 ? 'proativo' : 'sem sugestões extras'];
+      const socialPresence = traits.spontaneity > 0.72 && traits.initiative > 0.72
+        ? 'extrovertido, curioso e participativo'
+        : traits.warmth > 0.68 ? 'caloroso e atento' : 'cordial';
+      const tags = [tone, length, socialPresence, traits.humor > 0.62 ? 'humor livre' : traits.humor < 0.15 ? 'sem humor' : 'humor leve', traits.profanity > 0.5 ? 'palavrão só se natural' : 'sem palavrão', traits.initiative > 0.68 ? 'proativo' : 'sem sugestões extras'];
       return `Estilo: ${tags.join(', ')}.`;
     }
     const warmth = traits.warmth > 0.7 ? 'seja caloroso sem forçar intimidade' : 'cordialidade proporcional';

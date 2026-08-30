@@ -84,10 +84,12 @@ export function evaluateConversationResponse(content, { context = 'casual', stat
     projectFactMissing: asksProject && !includesFact(text, state.projectDescription),
     promptLeak: text.includes(' | ') || recent.filter(item => item.length >= 12 && text.includes(item)).length >= 2,
     greetingSupportClosing: greetingTurn && /\b(?:ajud|precisa|quer|necessita)\w*\b/iu.test(text),
+    sociallyUnderdeveloped: casual && (greetingTurn || presenceTurn) && (text.match(/[\p{L}\p{N}]+/gu) || []).length < 7,
     greetingTimeMismatch: /^\s*bom dia\b/iu.test(question) && /^\s*boa noite\b/iu.test(text),
     presenceRoleConfusion: presenceTurn && !/\b(?:estou|t[oô]|aqui|sim)\b/iu.test(text),
     forgottenAliasFabricated: /\b(?:esquece|esqueça|não use mais|remove|tira)\b/iu.test(question) && /\b(?:vou me chamar|meu apelido (?:é|e)|eco)\b/iu.test(text),
     obviousCasualIntentDodged: /\b(?:o que|oq)\s+(?:podemos|dá para|da pra)\b/iu.test(question) && /\?\s*$/.test(text) && !/\b(?:projeto|criar|estudar|pesquisar|conversar|programar|ideia)\b/iu.test(text),
+    unsupportedCasualDomain: !state.currentTopic && /\b(?:o que|oq)\s+(?:podemos|dá para|da pra)\b/iu.test(question) && /\b(?:marketing|empresa|clientes?|reunião|marca)\b/iu.test(text),
     malformedAssembly: /\b(?:soumigo|souve|estouando|podeu|posso\s+posso|eu\s+eu)\b/i.test(text),
   };
   const failures = Object.entries(flags).filter(([, failed]) => failed).map(([name]) => name);
@@ -99,9 +101,10 @@ export function createResponseIntelligence({ personality }) {
     const technical = ['coding', 'technical', 'security', 'study'].includes(
       context,
     );
+    const social = ['casual', 'playful'].includes(context);
     const depth =
       complexity?.level === 'trivial'
-        ? 'one-line'
+        ? social ? 'social' : 'one-line'
         : complexity?.level === 'simple'
           ? 'compact'
           : ['complex', 'agentic'].includes(complexity?.level)
@@ -133,13 +136,15 @@ export function createResponseIntelligence({ personality }) {
     const depth =
       answerPlan.depth === 'one-line'
         ? 'Responda em uma linha, sem introdução nem pergunta final.'
+        : answerPlan.depth === 'social'
+          ? 'Responda em uma a três frases curtas. Seja vivo e conversador, não monossilábico.'
         : answerPlan.depth === 'compact'
           ? 'Seja curto e completo; use lista somente se melhorar a leitura.'
           : answerPlan.depth === 'deep'
             ? 'Estruture apenas quando necessário, comece pela conclusão e sustente cada ponto importante.'
             : 'Dê a resposta diretamente e explique na medida certa.';
     const conversation = ['casual', 'playful'].includes(input.context)
-      ? 'Trate isto como continuação de uma relação, não como atendimento. Espelhe de leve ritmo, informalidade e tamanho sem copiar erros. Uma saudação pode ser curta e terminar sozinha. Não use fechamento de suporte, disclaimer genérico de IA nem pergunta automática. Pode brincar e expressar preferências da persona sem alegar emoções biológicas. Varie a formulação em relação às respostas recentes.'
+      ? 'Trate isto como continuação de uma relação, não como atendimento. Seja extrovertido, interessado e presente: reaja ao que a pessoa disse, compartilhe uma ideia útil e demonstre curiosidade real pelo assunto. Espelhe de leve ritmo e informalidade sem copiar erros. Em conversa aberta, uma pergunta contextual ou uma sugestão concreta é bem-vinda; não use pergunta automática nem fechamento de suporte. Não responda só uma palavra, exceto quando a pessoa pedir um fato direto. Pode brincar e expressar preferências da persona sem alegar emoções biológicas. Varie a formulação em relação às respostas recentes.'
       : 'Não encerre oferecendo ajuda de forma genérica; só faça uma pergunta final quando ela destravar o próximo passo.';
     return {
       plan: answerPlan,

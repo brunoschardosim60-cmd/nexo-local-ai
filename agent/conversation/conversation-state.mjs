@@ -213,6 +213,7 @@ function compactPrompt(state) {
   if (state.greetingCount > 1) lines.push(`O usuário já cumprimentou ${state.greetingCount} vezes nesta conversa; reconheça continuidade e não repita a mesma saudação.`);
   if (state.recentResponses.length) lines.push(`Aberturas/respostas recentes do Nexo a não repetir literalmente: ${state.recentResponses.slice(-3).map(item => JSON.stringify(item.slice(0, 160))).join('; ')}.`);
   lines.push('Resolva referências pelos turnos recentes antes de buscar memória longa. Em ambiguidades casuais, prováveis e reversíveis, faça a melhor interpretação sem pedir contexto desnecessário.');
+  if (!state.currentTopic) lines.push('Ainda não há assunto confirmado. Não invente empresa, cliente, reunião ou projeto; demonstre curiosidade e ofereça apenas possibilidades baseadas nas capacidades reais do Nexo.');
   return lines.join('\n');
 }
 

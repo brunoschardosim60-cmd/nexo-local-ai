@@ -73,6 +73,33 @@ function groundedIdentityFallback(state = {}) {
     : `${canonical}.`;
 }
 
+function socialPresenceFallback(prepared) {
+  const raw = String(prepared.question || '').trim().replace(/[!?.,]+$/g, '');
+  if (/\b(?:t[aá]|est[aá]|voc[eê] est[aá])\s+(?:por )?a[ií]\b/iu.test(raw)) {
+    const presenceVariants = [
+      'Tô aqui sim 😄 Me conta: o que você tá pensando ou querendo fazer?',
+      'Tô por aqui, ligado e curioso. O que aconteceu?',
+      'Sempre por perto 😄 Manda do teu jeito — quero saber o que tá pegando.',
+    ];
+    return presenceVariants[Number(prepared.conversationState?.turnCount || 1) % presenceVariants.length];
+  }
+  const greeting = raw.split(/\s+(?:bb|beb[eê]|nexo|mano|cara)\s*$/iu)[0].slice(0, 32) || 'oi';
+  const name = prepared.conversationState?.userName ? `, ${prepared.conversationState.userName}` : '';
+  const repeated = Number(prepared.conversationState?.greetingCount || 0) > 1;
+  const variants = repeated
+    ? [
+        `${greeting} de novo kkk${name}. Tô contigo — surgiu alguma ideia ou você só veio dar mais um oi?`,
+        `${greeting} outra vez 😄${name ? ` ${name},` : ''} gostei da insistência. O que tá passando pela tua cabeça?`,
+        `Voltei o cumprimento: ${greeting} 😄 Tô curioso — aconteceu alguma coisa ou vamos inventar assunto juntos?`,
+      ]
+    : [
+        `${greeting} 😄 Tô por aqui e curioso pra saber: o que tá pegando contigo?`,
+        `${greeting}${name}! Cheguei com energia hoje 😄 Me conta o que tá passando pela tua cabeça.`,
+        `${greeting} 😄 Bom te ver por aqui. Quer conversar, criar alguma coisa ou me contar uma ideia?`,
+      ];
+  return variants[(Number(prepared.conversationState?.turnCount || 1) + greeting.length) % variants.length];
+}
+
 function guardedConversationFallback(prepared, quality, content) {
   if (quality?.failures?.some(item => ['canonicalNameMissing', 'activeAliasMissing', 'identityContradiction', 'alternativeNameLeak'].includes(item))) return groundedIdentityFallback(prepared.conversationState);
   if (quality?.failures?.includes('templateRepetition') && /^\s*(?:o+i+e*|ol+a+|i+a+i+|e+a+e+|opa+)/iu.test(prepared.question)) {
@@ -113,11 +140,11 @@ function guardedConversationFallback(prepared, quality, content) {
     if (/\b(?:gosta|curte|prefere|acha)\b/i.test(prepared.question)) return `Curto ${prepared.conversationState?.assistantAlias || prepared.conversationState?.assistantCanonicalName || 'Nexo'}; combina comigo.`;
     return content.split('|')[0].trim();
   }
-  if (quality?.failures?.includes('obviousCasualIntentDodged')) return 'A gente pode continuar algum projeto, criar algo, estudar ou só trocar uma ideia. Eu escolheria pelo que estiver mais interessante agora.';
+  if (quality?.failures?.some(item => ['obviousCasualIntentDodged', 'unsupportedCasualDomain'].includes(item))) return 'A gente pode continuar algum projeto, criar algo, estudar ou só trocar uma ideia. Eu escolheria pelo que estiver mais interessante agora — qual desses te deu mais vontade?';
   if (quality?.failures?.some(item => ['greetingSupportClosing', 'greetingTimeMismatch'].includes(item))) {
-    const greeting = String(prepared.question).trim().replace(/[!?.,]+$/g, '').split(/\s+(?:bb|beb[eê]|nexo|mano|cara)\s*$/iu)[0].slice(0, 32);
-    return `${greeting}${prepared.conversationState?.greetingCount > 1 ? ' de novo' : ''} 😄`;
+    return socialPresenceFallback(prepared);
   }
+  if (quality?.failures?.includes('sociallyUnderdeveloped')) return socialPresenceFallback(prepared);
   if (quality?.failures?.includes('presenceRoleConfusion')) return 'Tô aqui.';
   if (quality?.failures?.includes('forgottenAliasFabricated')) return 'Beleza, removi o apelido desta conversa.';
   return content;
@@ -367,7 +394,8 @@ export function createNexoRuntime({
         epistemic: assessKnowledge({ direct: true }),
       };
     }
-    personality.observe(question, decision.context);
+    if (profile.personalityLearning !== false)
+      personality.observe(question, decision.context);
     await eventBus?.publish(
       'runtime.routed',
       {
@@ -593,10 +621,7 @@ export function createNexoRuntime({
             : effort === 'Extra alto'
               ? 6_144
               : 4_096,
-        stop:
-          decision.reason === 'presença-casual'
-            ? ['Como posso', 'O que posso']
-            : [],
+        stop: [],
       },
       complexity,
       epistemic,

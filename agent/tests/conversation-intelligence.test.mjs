@@ -115,6 +115,7 @@ test('sanity check detecta contradição, disclaimer, atendimento e repetição'
   assert.equal(evaluateConversationResponse('Como uma IA, não tenho sentimentos.', { context: 'casual', state: {}, question: 'tu gosta?' }).pass, false);
   assert.equal(evaluateConversationResponse('Claro, posso te chamar de P1!', { context: 'casual', state: { assistantAlias: 'P1' }, question: 'posso te chamar de P1?' }).failures.includes('aliasAssignmentRoleConfusion'), true);
   assert.equal(evaluateConversationResponse('Pode perguntar algo?', { context: 'casual', state: {}, question: 'oq podemos fazer' }).failures.includes('obviousCasualIntentDodged'), true);
+  assert.equal(evaluateConversationResponse('Oi!', { context: 'casual', state: {}, question: 'iaiii' }).failures.includes('sociallyUnderdeveloped'), true);
   assert.equal(evaluateConversationResponse('Oi! Como posso ajudar hoje?', { context: 'casual', state, question: 'oi' }).failures.includes('templateRepetition'), true);
   assert.equal(responseSimilarity('oi, tô aqui', 'oi! tô aqui'), 1);
 });

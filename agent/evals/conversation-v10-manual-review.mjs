@@ -38,7 +38,7 @@ async function ask({ question, sessionId, history }) {
       sessionId,
       mode: 'Geral',
       effort: 'Baixo',
-      profile: { name: '', city: '', style: 'natural', instructions: '', relationshipId: sessionId },
+      profile: { name: '', city: '', style: 'natural', instructions: '', relationshipId: sessionId, personalityLearning: false },
       history,
       documents: [],
       attachments: [],
