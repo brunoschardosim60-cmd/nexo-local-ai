@@ -1,4 +1,4 @@
-import type { AgentHealth, AgentTask, BackgroundJob, Chat, ChatMessage, Effort, LocalAttachment, LocalDocument, MediaArtifact, MediaJob, NexoMemory, NexoSkill, PersonalDashboard, PersonalGoal, PersonalSearchResult, PersonalSettings, PersonalSuggestion, PersonalTask, PresenceState, RuntimeEvent, RuntimeImmediateResponse, RuntimeStreamEvent, UserProfile } from './types';
+import type { AgentHealth, AgentTask, BackgroundJob, Chat, ChatMessage, Effort, LocalAttachment, LocalDocument, MediaArtifact, MediaJob, NexoCapability, NexoMemory, NexoSkill, NexoWorkflow, PersonalDashboard, PersonalGoal, PersonalSearchResult, PersonalSettings, PersonalSuggestion, PersonalTask, PresenceState, RuntimeEvent, RuntimeImmediateResponse, RuntimeStreamEvent, UserProfile } from './types';
 
 export const NEXO_AGENT_URL = 'http://127.0.0.1:7331';
 
@@ -66,6 +66,9 @@ export class NexoClient {
   async listEvents(after = 0, limit = 100) { return (await jsonResponse<{ events: RuntimeEvent[] }>(await fetch(`${this.baseUrl}/agent/events?after=${after}&limit=${limit}`, { headers: this.headers() }))).events; }
   async listBrowserSessions() { return jsonResponse(await fetch(`${this.baseUrl}/agent/browser/sessions`, { headers: this.headers() })); }
   async listMcpServers() { return jsonResponse(await fetch(`${this.baseUrl}/agent/mcp/servers`, { headers: this.headers() })); }
+  async listCapabilities(type?:string){const query=type?`?type=${encodeURIComponent(type)}`:'';return (await jsonResponse<{capabilities:NexoCapability[]}>(await fetch(`${this.baseUrl}/agent/capabilities${query}`,{headers:this.headers()}))).capabilities;}
+  async configureCapability(id:string,enabled:boolean){return (await jsonResponse<{capability:NexoCapability}>(await fetch(`${this.baseUrl}/agent/capabilities/configure`,{method:'POST',headers:this.headers(true),body:JSON.stringify({id,enabled})}))).capability;}
+  async listWorkflows(){return (await jsonResponse<{workflows:NexoWorkflow[]}>(await fetch(`${this.baseUrl}/agent/workflows`,{headers:this.headers()}))).workflows;}
   async resetPersonality() { return jsonResponse(await fetch(`${this.baseUrl}/agent/personality/reset`, { method: 'POST', headers: this.headers(true), body: JSON.stringify({ confirmation: 'RESET' }) })); }
   async personalDashboard() { return (await jsonResponse<{ dashboard: PersonalDashboard }>(await fetch(`${this.baseUrl}/agent/personal/dashboard`, { headers: this.headers() }))).dashboard; }
   async createPersonalGoal(input: Pick<PersonalGoal, 'title'> & Partial<PersonalGoal>) { return (await jsonResponse<{ goal: PersonalGoal }>(await fetch(`${this.baseUrl}/agent/personal/goals`, { method: 'POST', headers: this.headers(true), body: JSON.stringify(input) }))).goal; }

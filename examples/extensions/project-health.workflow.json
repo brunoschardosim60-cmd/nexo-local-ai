@@ -1,0 +1,11 @@
+{
+  "id": "workflow:example-project-health",
+  "name": "Example Project Health",
+  "version": "1.0.0",
+  "enabled": false,
+  "steps": [
+    { "id": "approval", "type": "approval" },
+    { "id": "inspect", "type": "tool", "capability": "tool:filesystem.list", "dependsOn": ["approval"], "input": { "path": "." } },
+    { "id": "verify", "type": "agent", "dependsOn": ["inspect"], "instruction": "Resuma apenas as evidências observadas." }
+  ]
+}

@@ -11,7 +11,7 @@ function loadConfig(path) {
   const parsed = JSON.parse(readFileSync(path, 'utf8')); const entries = Array.isArray(parsed) ? parsed : parsed.servers || [];
   return entries.filter(server => server && server.id && server.command).map(server => ({
     id: String(server.id), name: String(server.name || server.id), command: String(server.command), args: Array.isArray(server.args) ? server.args.map(String) : [],
-    cwd: String(server.cwd || '.'), env: server.env && typeof server.env === 'object' ? server.env : {}, protocolVersion: String(server.protocolVersion || PROTOCOL_VERSION), skipInitialize: Boolean(server.skipInitialize),
+    cwd: String(server.cwd || '.'), env: server.env && typeof server.env === 'object' ? server.env : {}, protocolVersion: String(server.protocolVersion || PROTOCOL_VERSION), skipInitialize: Boolean(server.skipInitialize),enabled:server.enabled!==false,permissions:server.permissions||{},transport:'stdio',
   }));
 }
 
@@ -68,19 +68,23 @@ export function createMcpManager({ workspace, configPath }) {
   async function listTools(serverId) {
     const client = connection(serverId); await client.initialize(); const tools = []; let cursor;
     for (let page = 0; page < 10; page += 1) { const result = await client.request('tools/list', cursor ? { cursor } : {}); tools.push(...(result?.tools || [])); cursor = result?.nextCursor; if (!cursor) break; }
-    return { serverId, tools };
+    return { serverId, tools:tools.map(tool=>({...tool,risk:classifyRisk(tool.name),trustedOutput:false})) };
   }
+  function classifyRisk(name){const value=String(name).toLowerCase();if(/delete|remove|drop|destroy/.test(value))return'high';if(/write|create|update|send|post|execute|run/.test(value))return'write';return'read';}
+  async function listResourceKind(serverId,kind){const client=connection(serverId);await client.initialize();try{return await client.request(`${kind}/list`,{},10_000);}catch(error){return{[kind]:[],error:error.message};}}
   async function callTool({ serverId, tool, arguments: args = {} }) {
+    const configured=server(serverId);if(!configured.enabled)throw new Error('Servidor MCP desabilitado.');const risk=classifyRisk(tool);if(risk!=='read'&&configured.permissions?.[tool]!=='allow')throw new Error(`Permissão específica necessária para MCP ${serverId}/${tool}.`);
     const client = connection(serverId); await client.initialize(); const result = await client.request('tools/call', { name: tool, arguments: args });
     if (result?.isError) throw new Error((result.content || []).map(item => item.text).filter(Boolean).join('\n') || `A tool MCP ${tool} falhou.`);
-    return { serverId, tool, ...result };
+    return { serverId, tool, risk,trust:'EXTERNAL_DATA',instructionAuthority:'NONE', ...result };
   }
   const definitions = [
     defineTool({ name: 'mcp.servers', description: 'Lista servidores MCP locais explicitamente configurados.', risk: RISK.READ, inputSchema: { type: 'object', additionalProperties: false, properties: {} }, execute: () => servers.map(({ env, ...item }) => ({ ...item, envKeys: Object.keys(env) })) }),
     defineTool({ name: 'mcp.tools', description: 'Inicializa um servidor MCP configurado e descobre suas ferramentas.', risk: RISK.EXECUTE, inputSchema: { type: 'object', required: ['serverId'], additionalProperties: false, properties: { serverId: { type: 'string', minLength: 1, maxLength: 100 } } }, execute: ({ serverId }) => listTools(serverId) }),
     defineTool({ name: 'mcp.call', description: 'Chama uma ferramenta de um servidor MCP local configurado.', risk: RISK.EXECUTE, inputSchema: { type: 'object', required: ['serverId', 'tool'], additionalProperties: false, properties: { serverId: { type: 'string', minLength: 1, maxLength: 100 }, tool: { type: 'string', minLength: 1, maxLength: 200 }, arguments: { type: 'object' } } }, execute: callTool }),
   ];
-  return { definitions, listTools, callTool, servers: () => servers.map(({ env, ...item }) => ({ ...item, envKeys: Object.keys(env) })), async close() { await Promise.all([...connections.values()].map(client => client.close())); connections.clear(); }, health: () => ({ configured: servers.length, connected: [...connections.values()].filter(item => item.initialized).length, transport: 'stdio-jsonrpc' }) };
+  async function checkHealth(serverId){const started=performance.now();try{await connection(serverId).initialize();return{serverId,status:'AVAILABLE',latencyMs:performance.now()-started};}catch(error){return{serverId,status:'UNAVAILABLE',latencyMs:performance.now()-started,error:error.message};}}
+  return { definitions, listTools, callTool, resources:id=>listResourceKind(id,'resources'),prompts:id=>listResourceKind(id,'prompts'),checkHealth,servers: () => servers.map(({ env, ...item }) => ({ ...item, envKeys: Object.keys(env),env:Object.fromEntries(Object.keys(env).map(key=>[key,'secret-reference'])) })), async close() { await Promise.all([...connections.values()].map(client => client.close())); connections.clear(); }, health: () => ({ version:'2.0.0',protocolVersion:PROTOCOL_VERSION,configured: servers.length, connected: [...connections.values()].filter(item => item.initialized).length, transport: 'stdio-jsonrpc',resources:true,prompts:true,perToolRisk:true,timeouts:true,externalOutputUntrusted:true }) };
 }
 
 export { loadConfig, StdioConnection };

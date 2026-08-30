@@ -85,6 +85,11 @@ const server = createServer(async (request, response) => {
     if (request.method === 'GET' && url.pathname === '/agent/background/jobs') return send(response, 200, { ok: true, jobs: core.scheduler.list(Math.min(Number(url.searchParams.get('limit')) || 30, 100)) });
     if (request.method === 'GET' && url.pathname === '/agent/browser/sessions') return send(response, 200, { ok: true, sessions: core.browser.sessions(Math.min(Number(url.searchParams.get('limit')) || 30, 100)) });
     if (request.method === 'GET' && url.pathname === '/agent/mcp/servers') return send(response, 200, { ok: true, servers: core.mcp.servers() });
+    if (request.method === 'GET' && url.pathname === '/agent/capabilities') return send(response, 200, { ok: true, capabilities: core.capabilityRegistry.list({ type: url.searchParams.get('type') || undefined, status: url.searchParams.get('status') || undefined }), health: core.capabilityRegistry.health() });
+    if (request.method === 'GET' && url.pathname === '/agent/capabilities/search') return send(response, 200, { ok: true, capabilities: core.capabilityRegistry.search(url.searchParams.get('q') || '', { limit: Math.min(Number(url.searchParams.get('limit')) || 8, 30), types: url.searchParams.get('types')?.split(',').filter(Boolean) || [] }) });
+    if (request.method === 'GET' && url.pathname === '/agent/workflows') return send(response, 200, { ok: true, workflows: core.workflows.list(), runs: core.workflows.runs() });
+    if (request.method === 'GET' && url.pathname === '/agent/workflows/templates') return send(response, 200, { ok: true, templates: core.workflows.templates() });
+    if (request.method === 'GET' && url.pathname === '/agent/connectors') return send(response, 200, { ok: true, connectors: core.connectors.list(), vault: core.vault.health() });
     if (request.method === 'GET' && url.pathname === '/agent/specialists') return send(response, 200, { ok: true, specialists: core.specialists.list() });
     if (request.method === 'GET' && url.pathname === '/agent/subtasks') return send(response, 200, { ok: true, subtasks: core.database.listChildTasks(url.searchParams.get('parentTaskId') || '') });
     if (request.method === 'GET' && url.pathname === '/agent/personality') return send(response, 200, { ok: true, personality: core.personality.snapshot('casual') });
@@ -151,6 +156,14 @@ const server = createServer(async (request, response) => {
     if (url.pathname === '/agent/image/edit') { const availability=await core.image.availability();if(!availability.available)return send(response,200,mediaUnavailable('image',availability));const job=core.mediaQueue.enqueue('image',{...input,mode:input.mode||'image-to-image'},{priority:input.priority||3});return send(response,202,{ok:true,job,content:'Edição adicionada à fila local.'}); }
     if (url.pathname === '/agent/video/storyboard') return send(response, 200, { ok: true, storyboard: core.video.storyboard(input) });
     if (url.pathname === '/agent/video/understand') return send(response, 200, { ok: true, result: await core.video.understand(input) });
+    if (url.pathname === '/agent/capabilities/execute') { const result=await core.capabilityRegistry.execute(input.id,input.input||{},{approved:Boolean(input.approved),taskId:input.taskId});audit('capability_execute',input.id,true,'structured');return send(response,200,result); }
+    if (url.pathname === '/agent/capabilities/configure') { const capability=input.preference?core.capabilityRegistry.prefer(input.id,input.preference):core.capabilityRegistry.setEnabled(input.id,input.enabled);return send(response,200,{ok:true,capability}); }
+    if (url.pathname === '/agent/workflows') { const workflow=core.workflows.create(input);return send(response,201,{ok:true,workflow}); }
+    if (url.pathname === '/agent/workflows/run') { const run=await core.workflows.run(input.workflowId,input.input||{},input.options||{});return send(response,200,{ok:true,run}); }
+    if (url.pathname === '/agent/workflows/resume') { const run=await core.workflows.resume(input.runId,input.options||{});return send(response,200,{ok:true,run}); }
+    if (url.pathname === '/agent/workflows/cancel') return send(response,200,{ok:true,run:core.workflows.cancel(input.runId)});
+    if (url.pathname === '/agent/skills/candidate') return send(response,200,{ok:true,candidate:core.skills.candidateFromProcedure(input)});
+    if (url.pathname === '/agent/mcp/discover') return send(response,200,{ok:true,tools:await core.mcp.listTools(input.serverId),resources:await core.mcp.resources(input.serverId),prompts:await core.mcp.prompts(input.serverId)});
     const personalGoalMatch = url.pathname.match(/^\/agent\/personal\/goals\/([^/]+)$/);
     const personalTaskMatch = url.pathname.match(/^\/agent\/personal\/tasks\/([^/]+)$/);
     const personalSuggestionMatch = url.pathname.match(/^\/agent\/personal\/suggestions\/([^/]+)$/);

@@ -57,8 +57,10 @@ export type AgentTaskEvent = { id: string; sequence: number; type: string; level
 export type AgentTaskNode = AgentTaskStep & { taskId: string; parentId?: string | null; attempts: number; confidence?: number | null; model?: string | null };
 export type AgentCheckpoint = { id: string; taskId: string; sequence: number; kind: string; label: string; createdAt: string };
 export type NexoSkill = { id: string; name: string; description: string; path: string; enabled: boolean; instructionChars: number };
+export type NexoCapability = { id:string;type:'TOOL'|'SKILL'|'MCP'|'PROVIDER'|'WORKFLOW'|'CONNECTOR';name:string;version:string;description:string;permissions:string[];risk:string;status:'AVAILABLE'|'DEGRADED'|'UNAVAILABLE'|'MISCONFIGURED';enabled:boolean;trust:string;health?:Record<string,unknown> };
+export type NexoWorkflow = { id:string;name:string;version:string;enabled:boolean;definition:{steps:Array<{id:string;type:string;dependsOn?:string[]}>};updatedAt:string };
 export type BackgroundJob = { id: string; name: string; objective: string; scheduleType: 'once' | 'interval'; intervalSeconds?: number | null; nextRunAt: string; status: string; lastTaskId?: string | null; runCount: number };
-export type RuntimeEvent = { sequence: number; id: string; type: string; level: string; taskId?: string | null; source: string; data?: unknown; createdAt: string };
+export type RuntimeEvent = { sequence: number; id: string; type: string; level: string; taskId?: string | null; source: string; trust?: string; data?: unknown; createdAt: string };
 export type AgentTask = {
   id: string; objective: string; status: string; plan: AgentTaskStep[]; graph?: AgentTaskNode[]; checkpoints?: AgentCheckpoint[];
   parentTaskId?: string | null; assignedAgent?: string; children?: Array<{ id: string; objective: string; status: string; assignedAgent?: string }>;

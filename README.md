@@ -1,5 +1,7 @@
 # Nexo Local AI
 
+> V9: plataforma extensível local-first com Capability Registry, Skills V3, MCP V2, connectors, workflows persistentes e vault de referências secretas.
+
 Runtime local-first para agentes pessoais, com interface web, memória persistente e modelos executados pelo Ollama. O Nexo oferece chat, programação, documentos, planilhas CSV, visão real, arquitetura de mídia com artefatos persistentes, voz pelo navegador, pesquisa com fontes, navegação segura e tarefas autônomas com ferramentas protegidas.
 
 ## Arquitetura do agente

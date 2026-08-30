@@ -153,7 +153,7 @@ export function createNexoRuntime({ config, memory, rag, ollama, research, loop,
       const capable = ['Alto', 'Extra alto'].includes(effort);
       return ollama.warm(capable ? config.capableModel : config.fastModel, capable ? effort === 'Extra alto' ? 6_144 : 4_096 : 2_048);
     },
-    health() { return { version: '8.0.0', routes: ['instant', 'fast', 'deep', 'agent', 'memory', 'personal','multimodal'], progressiveContext: true, adaptiveModelRouting: Boolean(router), contextualModes: ['GENERAL','WORK','CREATIVE','STUDY','FOCUS'], complexityEstimator: Boolean(estimator), responseIntelligence: Boolean(responseIntelligence), epistemicStates: ['KNOWN', 'INFERRED', 'RETRIEVED', 'UNCERTAIN', 'UNKNOWN'], streaming: true, autonomousBudgets: true, explicitMemoryCommands: true, smartResume: Boolean(personal), cacheEntries: cache.size(), personality: personality.health() }; },
+    health() { return { version: '9.0.0', routes: ['instant', 'fast', 'deep', 'agent', 'memory', 'personal','multimodal','capability'], progressiveContext: true, adaptiveModelRouting: Boolean(router), contextualModes: ['GENERAL','WORK','CREATIVE','STUDY','FOCUS'], complexityEstimator: Boolean(estimator), responseIntelligence: Boolean(responseIntelligence), epistemicStates: ['KNOWN', 'INFERRED', 'RETRIEVED', 'UNCERTAIN', 'UNKNOWN'], streaming: true, autonomousBudgets: true, explicitMemoryCommands: true, smartResume: Boolean(personal), cacheEntries: cache.size(), personality: personality.health() }; },
     clearCache() { cache.clear(); },
   };
 }

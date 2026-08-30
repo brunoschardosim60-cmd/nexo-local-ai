@@ -1,6 +1,6 @@
 {
   "name": "nexo-local-ai",
-  "version": "0.8.0",
+  "version": "0.9.0",
   "private": true,
   "engines": {
     "node": ">=22.13.0"
@@ -19,6 +19,7 @@
     "eval:knowledge": "node agent/evals/memory-v6-eval.mjs graph",
     "eval:personal": "node agent/evals/personal-v7-eval.mjs",
     "eval:multimodal": "node agent/evals/multimodal-v8-eval.mjs",
+    "eval:extensions": "node agent/evals/extensions-v9-eval.mjs",
     "benchmark:memory": "node agent/evals/memory-v6-eval.mjs performance",
     "benchmark:v4": "node agent/evals/performance-v4.mjs",
     "benchmark:v5": "node agent/evals/performance-v4.mjs",

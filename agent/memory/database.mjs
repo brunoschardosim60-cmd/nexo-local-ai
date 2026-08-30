@@ -88,6 +88,19 @@ export function createDatabase(dataDir) {
     `CREATE TABLE IF NOT EXISTS skill_states (
       path TEXT PRIMARY KEY, enabled INTEGER NOT NULL DEFAULT 1, updated_at TEXT NOT NULL
     )`,
+    `CREATE TABLE IF NOT EXISTS extension_state (
+      id TEXT PRIMARY KEY, kind TEXT NOT NULL, version TEXT NOT NULL, enabled INTEGER NOT NULL DEFAULT 1,
+      status TEXT NOT NULL DEFAULT 'AVAILABLE', config_json TEXT NOT NULL DEFAULT '{}', updated_at TEXT NOT NULL
+    )`,
+    `CREATE TABLE IF NOT EXISTS workflows (
+      id TEXT PRIMARY KEY, name TEXT NOT NULL, version TEXT NOT NULL, enabled INTEGER NOT NULL DEFAULT 0,
+      definition_json TEXT NOT NULL, state_json TEXT NOT NULL DEFAULT '{}', created_at TEXT NOT NULL, updated_at TEXT NOT NULL
+    )`,
+    `CREATE TABLE IF NOT EXISTS workflow_runs (
+      id TEXT PRIMARY KEY, workflow_id TEXT NOT NULL, status TEXT NOT NULL, input_json TEXT NOT NULL DEFAULT '{}',
+      state_json TEXT NOT NULL DEFAULT '{}', error TEXT, created_at TEXT NOT NULL, updated_at TEXT NOT NULL,
+      FOREIGN KEY(workflow_id) REFERENCES workflows(id) ON DELETE CASCADE
+    )`,
     `CREATE TABLE IF NOT EXISTS browser_sessions (
       id TEXT PRIMARY KEY, current_url TEXT NOT NULL, title TEXT NOT NULL,
       history_json TEXT NOT NULL DEFAULT '[]', snapshot_json TEXT NOT NULL DEFAULT '{}',
@@ -198,6 +211,8 @@ export function createDatabase(dataDir) {
     'CREATE INDEX IF NOT EXISTS idx_task_nodes_ready ON task_nodes(task_id, status, position)',
     'CREATE UNIQUE INDEX IF NOT EXISTS idx_checkpoints_task_sequence ON checkpoints(task_id, sequence)',
     'CREATE INDEX IF NOT EXISTS idx_runtime_events_type_sequence ON runtime_events(type, sequence DESC)',
+    'CREATE INDEX IF NOT EXISTS idx_extension_state_kind_enabled ON extension_state(kind, enabled)',
+    'CREATE INDEX IF NOT EXISTS idx_workflow_runs_workflow_status ON workflow_runs(workflow_id, status, updated_at DESC)',
     "CREATE INDEX IF NOT EXISTS idx_background_jobs_due ON background_jobs(status, next_run_at) WHERE status = 'active'",
     'CREATE INDEX IF NOT EXISTS idx_browser_sessions_updated ON browser_sessions(updated_at DESC)',
     'CREATE INDEX IF NOT EXISTS idx_personality_observations_trait_created ON personality_observations(trait, created_at DESC)',
@@ -242,6 +257,8 @@ export function createDatabase(dataDir) {
   const toolRunColumns = new Set(db.prepare('PRAGMA table_info(tool_runs)').all().map(column => column.name));
   if (!toolRunColumns.has('error_kind')) db.prepare('ALTER TABLE tool_runs ADD COLUMN error_kind TEXT').run();
   if (!toolRunColumns.has('output_summary_json')) db.prepare('ALTER TABLE tool_runs ADD COLUMN output_summary_json TEXT').run();
+  const runtimeEventColumns = new Set(db.prepare('PRAGMA table_info(runtime_events)').all().map(column => column.name));
+  if (!runtimeEventColumns.has('trust')) db.prepare("ALTER TABLE runtime_events ADD COLUMN trust TEXT NOT NULL DEFAULT 'TRUSTED'").run();
   db.prepare('INSERT INTO memories_fts (id, kind, content) SELECT m.id, m.kind, m.content FROM memories m WHERE NOT EXISTS (SELECT 1 FROM memories_fts f WHERE f.id = m.id)').run();
   db.prepare('INSERT INTO document_chunks_fts (id, source, content) SELECT d.id, d.source, d.content FROM document_chunks d WHERE NOT EXISTS (SELECT 1 FROM document_chunks_fts f WHERE f.id = d.id)').run();
   db.exec('PRAGMA optimize');
@@ -502,10 +519,10 @@ export function createDatabase(dataDir) {
     return db.prepare("SELECT * FROM tasks WHERE status IN ('planning','running') ORDER BY updated_at ASC LIMIT ?").all(limit).map(hydrateTask);
   }
 
-  function addRuntimeEvent(type, data = null, { level = 'info', taskId = null, source = 'core' } = {}) {
-    const event = { id: randomUUID(), type, level, taskId, source, data, createdAt: new Date().toISOString() };
-    const result = db.prepare('INSERT INTO runtime_events (id, type, level, task_id, source, data_json, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)')
-      .run(event.id, event.type, event.level, event.taskId, event.source, data == null ? null : JSON.stringify(data), event.createdAt);
+  function addRuntimeEvent(type, data = null, { level = 'info', taskId = null, source = 'core', trust = 'TRUSTED' } = {}) {
+    const event = { id: randomUUID(), type, level, taskId, source, trust, data, createdAt: new Date().toISOString() };
+    const result = db.prepare('INSERT INTO runtime_events (id, type, level, task_id, source, trust, data_json, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)')
+      .run(event.id, event.type, event.level, event.taskId, event.source, event.trust, data == null ? null : JSON.stringify(data), event.createdAt);
     return { sequence: Number(result.lastInsertRowid), ...event };
   }
   function listRuntimeEvents({ after = 0, limit = 100, type = null } = {}) {
@@ -513,7 +530,7 @@ export function createDatabase(dataDir) {
     const rows = type
       ? db.prepare('SELECT * FROM runtime_events WHERE sequence > ? AND type = ? ORDER BY sequence ASC LIMIT ?').all(Number(after) || 0, type, safeLimit)
       : db.prepare('SELECT * FROM runtime_events WHERE sequence > ? ORDER BY sequence ASC LIMIT ?').all(Number(after) || 0, safeLimit);
-    return rows.map(row => ({ sequence: row.sequence, id: row.id, type: row.type, level: row.level, taskId: row.task_id, source: row.source, data: json(row.data_json), createdAt: row.created_at }));
+    return rows.map(row => ({ sequence: row.sequence, id: row.id, type: row.type, level: row.level, taskId: row.task_id, source: row.source, trust: row.trust, data: json(row.data_json), createdAt: row.created_at }));
   }
 
   function hydrateJob(row) {
@@ -543,6 +560,15 @@ export function createDatabase(dataDir) {
     return { path, enabled: Boolean(enabled), updatedAt: now };
   }
   function getSkillStates() { return new Map(db.prepare('SELECT path, enabled FROM skill_states').all().map(row => [row.path, Boolean(row.enabled)])); }
+  function putExtensionState(record) { const now=new Date().toISOString();db.prepare(`INSERT INTO extension_state(id,kind,version,enabled,status,config_json,updated_at) VALUES(?,?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET kind=excluded.kind,version=excluded.version,enabled=excluded.enabled,status=excluded.status,config_json=excluded.config_json,updated_at=excluded.updated_at`).run(record.id,record.kind,record.version||'1.0.0',record.enabled===false?0:1,record.status||'AVAILABLE',JSON.stringify(record.config||{}),now);return getExtensionState(record.id); }
+  function getExtensionState(id) { const row=db.prepare('SELECT * FROM extension_state WHERE id=?').get(id);return row?{id:row.id,kind:row.kind,version:row.version,enabled:Boolean(row.enabled),status:row.status,config:json(row.config_json,{}),updatedAt:row.updated_at}:null; }
+  function listExtensionStates(kind=null) { return (kind?db.prepare('SELECT id FROM extension_state WHERE kind=? ORDER BY id').all(kind):db.prepare('SELECT id FROM extension_state ORDER BY kind,id').all()).map(row=>getExtensionState(row.id)); }
+  function putWorkflow(record) { const now=new Date().toISOString();const current=getWorkflow(record.id);db.prepare(`INSERT INTO workflows(id,name,version,enabled,definition_json,state_json,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET name=excluded.name,version=excluded.version,enabled=excluded.enabled,definition_json=excluded.definition_json,state_json=excluded.state_json,updated_at=excluded.updated_at`).run(record.id,record.name,record.version||'1.0.0',record.enabled?1:0,JSON.stringify(record.definition||{}),JSON.stringify(record.state||{}),current?.createdAt||now,now);return getWorkflow(record.id); }
+  function getWorkflow(id) { const row=db.prepare('SELECT * FROM workflows WHERE id=?').get(id);return row?{id:row.id,name:row.name,version:row.version,enabled:Boolean(row.enabled),definition:json(row.definition_json,{}),state:json(row.state_json,{}),createdAt:row.created_at,updatedAt:row.updated_at}:null; }
+  function listWorkflows() { return db.prepare('SELECT id FROM workflows ORDER BY updated_at DESC').all().map(row=>getWorkflow(row.id)); }
+  function putWorkflowRun(record) { const now=new Date().toISOString();const current=getWorkflowRun(record.id);db.prepare(`INSERT INTO workflow_runs(id,workflow_id,status,input_json,state_json,error,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET status=excluded.status,state_json=excluded.state_json,error=excluded.error,updated_at=excluded.updated_at`).run(record.id,record.workflowId,record.status,JSON.stringify(record.input||current?.input||{}),JSON.stringify(record.state||{}),record.error||null,current?.createdAt||now,now);return getWorkflowRun(record.id); }
+  function getWorkflowRun(id) { const row=db.prepare('SELECT * FROM workflow_runs WHERE id=?').get(id);return row?{id:row.id,workflowId:row.workflow_id,status:row.status,input:json(row.input_json,{}),state:json(row.state_json,{}),error:row.error,createdAt:row.created_at,updatedAt:row.updated_at}:null; }
+  function listWorkflowRuns(workflowId=null) { return (workflowId?db.prepare('SELECT id FROM workflow_runs WHERE workflow_id=? ORDER BY updated_at DESC').all(workflowId):db.prepare('SELECT id FROM workflow_runs ORDER BY updated_at DESC LIMIT 100').all()).map(row=>getWorkflowRun(row.id)); }
 
   function putBrowserSession({ id = randomUUID(), currentUrl, title = '', history = [], snapshot = {} }) {
     const now = new Date().toISOString();
@@ -696,7 +722,7 @@ export function createDatabase(dataDir) {
     replaceDocumentChunks, listDocumentChunks, updateDocumentChunkVector, searchDocumentChunksText, putSession, getSession, replaceTaskGraph, getTaskGraph,
     putCheckpoint, listCheckpoints, pruneCheckpoints, putRepositoryMap, getRepositoryMap, listInterruptedTasks,
     addRuntimeEvent, listRuntimeEvents, createBackgroundJob, getBackgroundJob, listBackgroundJobs, listDueBackgroundJobs, updateBackgroundJob,
-    setSkillEnabled, getSkillStates, putBrowserSession, getBrowserSession, listBrowserSessions,
+    setSkillEnabled, getSkillStates, putExtensionState, getExtensionState, listExtensionStates, putWorkflow, getWorkflow, listWorkflows, putWorkflowRun, getWorkflowRun, listWorkflowRuns, putBrowserSession, getBrowserSession, listBrowserSessions,
     listPersonalityTraits, upsertPersonalityTrait, addPersonalityObservation, listPersonalityObservations, resetPersonality,
     upsertModelBenchmark, listModelBenchmarks,
     putArtifact, getArtifact, listArtifacts, linkArtifacts, getArtifactProvenance, createMediaJob, getMediaJob, updateMediaJob, listMediaJobs, addPerformanceSample, listPerformanceSamples,

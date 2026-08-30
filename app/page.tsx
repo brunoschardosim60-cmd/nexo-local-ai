@@ -3,7 +3,7 @@
 
 import { ChangeEvent, type ReactNode, useEffect, useMemo, useRef, useState } from 'react';
 import {
-  ArrowUp, Bot, Check, Clock3, CloudSun, Code2, Copy, Download, Film, Gauge,
+  ArrowUp, Blocks, Bot, Check, Clock3, CloudSun, Code2, Copy, Download, Film, Gauge,
   FilePenLine, FileText, FolderPlus, Globe2, ImageIcon, Library, Menu, Mic, MicOff,
   Keyboard, LayoutDashboard, Moon, Network, Paperclip, Plus, RefreshCw, Search, Server, Settings2, ShieldCheck, Sparkles,
   Sun, Table2, Trash2, Volume2, VolumeX, X,
@@ -29,6 +29,7 @@ import { NexoMark } from '@/components/nexo-mark';
 import { AgentTaskCard } from '@/components/nexo/agent-task-card';
 import { PersonalWorkspace } from '@/components/nexo/personal-workspace';
 import { PresenceControls } from '@/components/nexo/presence-controls';
+import { CapabilityCenter } from '@/components/nexo/capability-center';
 
 type Weather = { label: string; temperature: number; apparent: number; wind: number; code: number };
 type WeatherApiResponse = { current: { temperature_2m: number; apparent_temperature: number; wind_speed_10m: number; weather_code: number } };
@@ -272,6 +273,7 @@ export default function Home() {
   const [memoryDraft, setMemoryDraft] = useState('');
   const [memoryLoading, setMemoryLoading] = useState(false);
   const [personalOpen, setPersonalOpen] = useState(false);
+  const [capabilityOpen, setCapabilityOpen] = useState(false);
   const [commandOpen, setCommandOpen] = useState(false);
   const [mobileOpen, setMobileOpen] = useState(false);
   const [theme, setTheme] = useState<'light' | 'dark'>('dark');
@@ -687,6 +689,7 @@ export default function Home() {
       </div>
       <Button className="mt-2 justify-start" variant="ghost" onClick={() => { setSecurityOpen(true); setMobileOpen(false); }}><ShieldCheck /> Segurança e rede</Button>
       <Button className="justify-start" variant="ghost" onClick={() => { setPersonalOpen(true); setMobileOpen(false); }}><LayoutDashboard /> Meu dia</Button>
+      <Button className="justify-start" variant="ghost" onClick={() => { setCapabilityOpen(true); setMobileOpen(false); }}><Blocks /> Capacidades</Button>
       <Button className="justify-start" variant="ghost" onClick={() => { setCommandOpen(true); setMobileOpen(false); }}><Keyboard /> Comandos <kbd className="ml-auto text-[9px] text-muted-foreground">Ctrl K</kbd></Button>
       <Button className="justify-start" variant="ghost" onClick={() => void openMemoryCenter()}><Library /> Memória do Nexo</Button>
       <Button className="justify-start" variant="ghost" onClick={() => { setProfileOpen(true); setMobileOpen(false); }}><Settings2 /> Meu perfil</Button>
@@ -805,6 +808,7 @@ export default function Home() {
     <Sheet open={mobileOpen} onOpenChange={setMobileOpen}><SheetContent side="left" className="w-[290px] border-border bg-sidebar p-0"><SheetHeader className="sr-only"><SheetTitle>Menu do Nexo</SheetTitle><SheetDescription>Chats e configurações</SheetDescription></SheetHeader>{sidebar}</SheetContent></Sheet>
 
     <PersonalWorkspace open={personalOpen} commandOpen={commandOpen} token={agentToken} onOpenChange={setPersonalOpen} onCommandOpenChange={setCommandOpen} onPrompt={(value, nextMode) => { if (nextMode) setMode(nextMode); setPrompt(value); setNotice('Comando preparado. Revise e envie quando quiser.'); }} onNotice={setNotice} />
+    <CapabilityCenter open={capabilityOpen} token={agentToken} onOpenChange={setCapabilityOpen} onNotice={setNotice}/>
 
     <Dialog open={profileOpen} onOpenChange={setProfileOpen}>
       <DialogContent className="max-h-[calc(100dvh-2rem)] overflow-y-auto border border-border bg-card sm:max-w-md">

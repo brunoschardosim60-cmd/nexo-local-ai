@@ -10,7 +10,8 @@ function parseSkill(content, path) {
     const match = line.match(/^([\w-]+):\s*(.*)$/); if (match) fields[match[1]] = match[2].replace(/^['"]|['"]$/g, '').trim();
   }
   const body = content.slice(frontmatter?.[0]?.length || 0).trim();
-  return { id: fields.name || path.replace(/[\\/]/g, ':'), name: fields.name || 'skill-local', description: fields.description || body.split(/\r?\n/).find(Boolean) || 'Skill local', path, instructions: body, size: content.length };
+  const list=value=>String(value||'').split(',').map(x=>x.trim()).filter(Boolean);
+  return { id: fields.name || path.replace(/[\\/]/g, ':'), name: fields.name || 'skill-local', version:fields.version||'1.0.0', description: fields.description || body.split(/\r?\n/).find(Boolean) || 'Skill local', triggers:list(fields.triggers),requiredTools:list(fields.requiredTools),optionalTools:list(fields.optionalTools),permissions:list(fields.permissions),risk:fields.risk||'read',author:fields.author||'local',trust:path.includes(`${sep}skills${sep}`)?'LOCAL':'UNVERIFIED',path, instructions: body, examples:[],tests:[],size: content.length };
 }
 
 function tokens(value) { return new Set(String(value).normalize('NFD').replace(/\p{Diacritic}/gu, '').toLowerCase().match(/[a-z0-9_-]{3,}/g) || []); }
@@ -42,6 +43,8 @@ export function createSkillEngine({ roots, database }) {
     const skill = cache.find(item => item.id === id || item.name === id || item.path === id); if (!skill) throw new Error('Skill não encontrada.');
     database.setSkillEnabled(skill.path, enabled); skill.enabled = Boolean(enabled); return { id: skill.id, name: skill.name, enabled: skill.enabled };
   }
+  function validate(skill){const errors=[];if(!skill.name)errors.push('name');if(!/^\d+\.\d+\.\d+$/.test(skill.version))errors.push('version');if(!skill.instructions)errors.push('instructions');if(skill.permissions.includes('system'))errors.push('system permission forbidden');return{valid:errors.length===0,errors,isolated:true,authority:'below-system-user-safety'};}
+  function candidateFromProcedure(procedure){return{status:'REVIEW_REQUIRED',manifest:{name:String(procedure.name||'procedimento').toLowerCase().replace(/[^a-z0-9_-]+/g,'-'),version:'1.0.0',description:procedure.description||'Procedimento reutilizável',triggers:procedure.triggers||[],requiredTools:procedure.requiredTools||[],permissions:procedure.permissions||[],risk:procedure.risk||'read'},instructions:procedure.steps||[],quality:{successCount:procedure.successCount||0,failureCount:procedure.failureCount||0,confidence:procedure.confidence||0},installRequiresConfirmation:true};}
   function match(objective, limit = 3) {
     const wanted = tokens(objective);
     return cache.filter(skill => skill.enabled).map(skill => {
@@ -58,7 +61,7 @@ export function createSkillEngine({ roots, database }) {
   ];
 
   const initialRefresh = refresh().catch(() => []);
-  return { definitions, refresh, ready: () => initialRefresh, list, read, match, contextFor, setEnabled, health: () => ({ loaded: cache.length, enabled: cache.filter(skill => skill.enabled).length, roots }) };
+  return { definitions, refresh, ready: () => initialRefresh, list, read, match, contextFor, setEnabled, validate, candidateFromProcedure, health: () => ({ version:'3.0.0',loaded: cache.length, enabled: cache.filter(skill => skill.enabled).length, roots,manifest:true,validation:true,versioning:['install','update','rollback','disable','remove'],selfModification:'confirmation-required' }) };
 }
 
 export { parseSkill };
