@@ -5,7 +5,7 @@ export function createExecutor({ registry, database, logger, maxOutput }) {
       for (let attempt = 1; attempt <= maxRetries + 1; attempt += 1) {
         const startedAt = performance.now();
         try {
-          const output = await registry.execute(action.tool, action.input);
+          const output = await registry.execute(action.tool, action.input, { taskId, stepIndex });
           const durationMs = performance.now() - startedAt;
           const serialized = JSON.stringify(output);
           const clipped = serialized.length <= maxOutput ? output : { truncated: true, preview: serialized.slice(0, maxOutput) };

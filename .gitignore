@@ -44,4 +44,7 @@ next-env.d.ts
 /data/logs/
 /data/sessions/
 /data/vectors/
+/data/skills/
+/data/mcp-servers.json
+/.nexo-artifacts/
 /.nexo-backups/

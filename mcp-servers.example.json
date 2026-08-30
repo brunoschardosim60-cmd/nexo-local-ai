@@ -1,0 +1,13 @@
+{
+  "servers": [
+    {
+      "id": "meu-servidor-local",
+      "name": "Meu servidor MCP",
+      "command": "node",
+      "args": ["caminho/para/server.mjs"],
+      "cwd": ".",
+      "protocolVersion": "2025-06-18",
+      "env": {}
+    }
+  ]
+}

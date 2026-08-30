@@ -1,12 +1,12 @@
 export const RISK = Object.freeze({ READ: 'read', WRITE: 'write', EXECUTE: 'execute', NETWORK: 'network', DESTRUCTIVE: 'destructive' });
 export const DECISION = Object.freeze({ ALLOW: 'allow', ASK: 'ask', DENY: 'deny' });
 
-const PROTECTED_PATH = /(^|[\\/])(?:\.ssh|\.aws|\.gnupg|AppData|System32|Windows)([\\/]|$)|(^|[\\/])(?:\.env(?:\.|$)|id_rsa|id_ed25519|credentials|secrets?)([\\/]|$)/i;
+const PROTECTED_PATH = /(^|[\\/])(?:\.ssh|\.aws|\.gnupg|AppData|System32|Windows)([\\/]|$)|(^|[\\/])(?:\.env(?:\.[^\\/]+)?|id_rsa|id_ed25519|credentials(?:\.[^\\/]+)?|secrets?(?:\.[^\\/]+)?)([\\/]|$)/i;
 const DESTRUCTIVE_COMMAND = /(?:^|\s)(?:rm|rmdir|del|erase|format|shutdown|reboot|diskpart)(?:\s|$)|reset\s+--hard|clean\s+-fd/i;
 
 export function permissionPolicy(tool, input = {}) {
   const risk = tool.risk || RISK.READ;
-  const scope = String(input.path || input.cwd || input.command || '.').slice(0, 500);
+  const scope = String(input.path || input.url || input.serverId || input.jobId || input.cwd || input.command || input.objective || '.').slice(0, 500);
   if (PROTECTED_PATH.test(scope)) return { decision: DECISION.DENY, required: false, risk, scope, reason: 'A política bloqueou acesso a credenciais ou diretório protegido.' };
   if (DESTRUCTIVE_COMMAND.test(`${input.command || ''} ${(input.args || []).join(' ')}`)) return { decision: DECISION.DENY, required: false, risk: RISK.DESTRUCTIVE, scope, reason: 'Comando destrutivo bloqueado permanentemente.' };
   if (risk === RISK.DESTRUCTIVE) return { decision: DECISION.DENY, required: false, risk, scope, reason: `A ferramenta ${tool.name} foi classificada como destrutiva.` };

@@ -18,7 +18,7 @@ export function createDatabase(dataDir) {
       id TEXT PRIMARY KEY, objective TEXT NOT NULL, status TEXT NOT NULL,
       plan_json TEXT NOT NULL DEFAULT '[]', current_step INTEGER NOT NULL DEFAULT 0,
       steps_used INTEGER NOT NULL DEFAULT 0, max_steps INTEGER NOT NULL,
-      max_retries INTEGER NOT NULL, result_json TEXT, error TEXT,
+      max_retries INTEGER NOT NULL, parent_task_id TEXT, assigned_agent TEXT NOT NULL DEFAULT 'general', result_json TEXT, error TEXT,
       created_at TEXT NOT NULL, updated_at TEXT NOT NULL, completed_at TEXT
     )`,
     `CREATE TABLE IF NOT EXISTS task_events (
@@ -74,6 +74,25 @@ export function createDatabase(dataDir) {
       root TEXT PRIMARY KEY, fingerprint TEXT NOT NULL, map_json TEXT NOT NULL,
       created_at TEXT NOT NULL, updated_at TEXT NOT NULL
     )`,
+    `CREATE TABLE IF NOT EXISTS runtime_events (
+      sequence INTEGER PRIMARY KEY AUTOINCREMENT, id TEXT NOT NULL UNIQUE,
+      type TEXT NOT NULL, level TEXT NOT NULL, task_id TEXT, source TEXT NOT NULL,
+      data_json TEXT, created_at TEXT NOT NULL
+    )`,
+    `CREATE TABLE IF NOT EXISTS background_jobs (
+      id TEXT PRIMARY KEY, name TEXT NOT NULL, objective TEXT NOT NULL,
+      schedule_type TEXT NOT NULL, interval_seconds INTEGER, next_run_at TEXT NOT NULL,
+      status TEXT NOT NULL, last_run_at TEXT, last_task_id TEXT, run_count INTEGER NOT NULL DEFAULT 0,
+      created_at TEXT NOT NULL, updated_at TEXT NOT NULL
+    )`,
+    `CREATE TABLE IF NOT EXISTS skill_states (
+      path TEXT PRIMARY KEY, enabled INTEGER NOT NULL DEFAULT 1, updated_at TEXT NOT NULL
+    )`,
+    `CREATE TABLE IF NOT EXISTS browser_sessions (
+      id TEXT PRIMARY KEY, current_url TEXT NOT NULL, title TEXT NOT NULL,
+      history_json TEXT NOT NULL DEFAULT '[]', snapshot_json TEXT NOT NULL DEFAULT '{}',
+      created_at TEXT NOT NULL, updated_at TEXT NOT NULL
+    )`,
     `CREATE VIRTUAL TABLE IF NOT EXISTS memories_fts USING fts5(
       id UNINDEXED, kind UNINDEXED, content, tokenize='unicode61 remove_diacritics 2'
     )`,
@@ -88,12 +107,19 @@ export function createDatabase(dataDir) {
     'CREATE UNIQUE INDEX IF NOT EXISTS idx_document_chunks_source_index ON document_chunks(source, chunk_index)',
     'CREATE INDEX IF NOT EXISTS idx_task_nodes_ready ON task_nodes(task_id, status, position)',
     'CREATE UNIQUE INDEX IF NOT EXISTS idx_checkpoints_task_sequence ON checkpoints(task_id, sequence)',
+    'CREATE INDEX IF NOT EXISTS idx_runtime_events_type_sequence ON runtime_events(type, sequence DESC)',
+    "CREATE INDEX IF NOT EXISTS idx_background_jobs_due ON background_jobs(status, next_run_at) WHERE status = 'active'",
+    'CREATE INDEX IF NOT EXISTS idx_browser_sessions_updated ON browser_sessions(updated_at DESC)',
   ];
   for (const statement of statements) db.prepare(statement).run();
   const memoryColumns = new Set(db.prepare('PRAGMA table_info(memories)').all().map(column => column.name));
   if (!memoryColumns.has('confidence')) db.prepare('ALTER TABLE memories ADD COLUMN confidence REAL NOT NULL DEFAULT 0.7').run();
   if (!memoryColumns.has('source')) db.prepare("ALTER TABLE memories ADD COLUMN source TEXT NOT NULL DEFAULT 'agent'").run();
   if (!memoryColumns.has('last_confirmed_at')) db.prepare('ALTER TABLE memories ADD COLUMN last_confirmed_at TEXT').run();
+  const taskColumns = new Set(db.prepare('PRAGMA table_info(tasks)').all().map(column => column.name));
+  if (!taskColumns.has('parent_task_id')) db.prepare('ALTER TABLE tasks ADD COLUMN parent_task_id TEXT').run();
+  if (!taskColumns.has('assigned_agent')) db.prepare("ALTER TABLE tasks ADD COLUMN assigned_agent TEXT NOT NULL DEFAULT 'general'").run();
+  db.prepare('CREATE INDEX IF NOT EXISTS idx_tasks_parent_updated ON tasks(parent_task_id, updated_at)').run();
   db.prepare('INSERT INTO memories_fts (id, kind, content) SELECT m.id, m.kind, m.content FROM memories m WHERE NOT EXISTS (SELECT 1 FROM memories_fts f WHERE f.id = m.id)').run();
   db.prepare('INSERT INTO document_chunks_fts (id, source, content) SELECT d.id, d.source, d.content FROM document_chunks d WHERE NOT EXISTS (SELECT 1 FROM document_chunks_fts f WHERE f.id = d.id)').run();
   db.exec('PRAGMA optimize');
@@ -109,19 +135,21 @@ export function createDatabase(dataDir) {
       id: row.id, objective: row.objective, status: row.status,
       plan: json(row.plan_json, []), currentStep: row.current_step, stepsUsed: row.steps_used,
       maxSteps: row.max_steps, maxRetries: row.max_retries,
+      parentTaskId: row.parent_task_id, assignedAgent: row.assigned_agent || 'general',
       result: json(row.result_json), error: row.error,
       createdAt: row.created_at, updatedAt: row.updated_at, completedAt: row.completed_at,
     };
   }
 
-  function createTask({ objective, maxSteps, maxRetries }) {
+  function createTask({ objective, maxSteps, maxRetries, parentTaskId = null, assignedAgent = 'general' }) {
     const id = randomUUID(); const now = new Date().toISOString();
-    db.prepare('INSERT INTO tasks (id, objective, status, max_steps, max_retries, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)')
-      .run(id, objective, 'planning', maxSteps, maxRetries, now, now);
+    db.prepare('INSERT INTO tasks (id, objective, status, max_steps, max_retries, parent_task_id, assigned_agent, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)')
+      .run(id, objective, 'planning', maxSteps, maxRetries, parentTaskId, assignedAgent, now, now);
     return getTask(id);
   }
   function getTask(id) { return hydrateTask(db.prepare('SELECT * FROM tasks WHERE id = ?').get(id)); }
   function listTasks(limit = 30) { return db.prepare('SELECT * FROM tasks ORDER BY updated_at DESC LIMIT ?').all(limit).map(hydrateTask); }
+  function listChildTasks(parentTaskId) { return db.prepare('SELECT * FROM tasks WHERE parent_task_id = ? ORDER BY created_at ASC').all(parentTaskId).map(hydrateTask); }
   function updateTask(id, patch) {
     const current = getTask(id); if (!current) throw new Error('Tarefa não encontrada.');
     const next = { ...current, ...patch, updatedAt: new Date().toISOString() };
@@ -268,10 +296,67 @@ export function createDatabase(dataDir) {
     return db.prepare("SELECT * FROM tasks WHERE status IN ('planning','running') ORDER BY updated_at ASC LIMIT ?").all(limit).map(hydrateTask);
   }
 
+  function addRuntimeEvent(type, data = null, { level = 'info', taskId = null, source = 'core' } = {}) {
+    const event = { id: randomUUID(), type, level, taskId, source, data, createdAt: new Date().toISOString() };
+    const result = db.prepare('INSERT INTO runtime_events (id, type, level, task_id, source, data_json, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)')
+      .run(event.id, event.type, event.level, event.taskId, event.source, data == null ? null : JSON.stringify(data), event.createdAt);
+    return { sequence: Number(result.lastInsertRowid), ...event };
+  }
+  function listRuntimeEvents({ after = 0, limit = 100, type = null } = {}) {
+    const safeLimit = Math.max(1, Math.min(Number(limit) || 100, 500));
+    const rows = type
+      ? db.prepare('SELECT * FROM runtime_events WHERE sequence > ? AND type = ? ORDER BY sequence ASC LIMIT ?').all(Number(after) || 0, type, safeLimit)
+      : db.prepare('SELECT * FROM runtime_events WHERE sequence > ? ORDER BY sequence ASC LIMIT ?').all(Number(after) || 0, safeLimit);
+    return rows.map(row => ({ sequence: row.sequence, id: row.id, type: row.type, level: row.level, taskId: row.task_id, source: row.source, data: json(row.data_json), createdAt: row.created_at }));
+  }
+
+  function hydrateJob(row) {
+    return row ? { id: row.id, name: row.name, objective: row.objective, scheduleType: row.schedule_type, intervalSeconds: row.interval_seconds, nextRunAt: row.next_run_at, status: row.status, lastRunAt: row.last_run_at, lastTaskId: row.last_task_id, runCount: row.run_count, createdAt: row.created_at, updatedAt: row.updated_at } : null;
+  }
+  function createBackgroundJob({ name, objective, scheduleType = 'once', intervalSeconds = null, nextRunAt }) {
+    const id = randomUUID(); const now = new Date().toISOString();
+    db.prepare('INSERT INTO background_jobs (id, name, objective, schedule_type, interval_seconds, next_run_at, status, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)')
+      .run(id, name, objective, scheduleType, intervalSeconds, nextRunAt, 'active', now, now);
+    return getBackgroundJob(id);
+  }
+  function getBackgroundJob(id) { return hydrateJob(db.prepare('SELECT * FROM background_jobs WHERE id = ?').get(id)); }
+  function listBackgroundJobs(limit = 100) { return db.prepare('SELECT * FROM background_jobs ORDER BY created_at DESC LIMIT ?').all(Math.max(1, Math.min(Number(limit) || 100, 500))).map(hydrateJob); }
+  function listDueBackgroundJobs(now = new Date().toISOString(), limit = 20) { return db.prepare("SELECT * FROM background_jobs WHERE status = 'active' AND next_run_at <= ? ORDER BY next_run_at ASC LIMIT ?").all(now, Math.max(1, Math.min(Number(limit) || 20, 100))).map(hydrateJob); }
+  function updateBackgroundJob(id, patch = {}) {
+    const current = getBackgroundJob(id); if (!current) throw new Error('Agendamento não encontrado.');
+    const next = { ...current, ...patch, updatedAt: new Date().toISOString() };
+    db.prepare('UPDATE background_jobs SET name=?, objective=?, schedule_type=?, interval_seconds=?, next_run_at=?, status=?, last_run_at=?, last_task_id=?, run_count=?, updated_at=? WHERE id=?')
+      .run(next.name, next.objective, next.scheduleType, next.intervalSeconds, next.nextRunAt, next.status, next.lastRunAt, next.lastTaskId, next.runCount, next.updatedAt, id);
+    return getBackgroundJob(id);
+  }
+
+  function setSkillEnabled(path, enabled) {
+    const now = new Date().toISOString();
+    db.prepare(`INSERT INTO skill_states (path, enabled, updated_at) VALUES (?, ?, ?)
+      ON CONFLICT(path) DO UPDATE SET enabled=excluded.enabled, updated_at=excluded.updated_at`).run(path, enabled ? 1 : 0, now);
+    return { path, enabled: Boolean(enabled), updatedAt: now };
+  }
+  function getSkillStates() { return new Map(db.prepare('SELECT path, enabled FROM skill_states').all().map(row => [row.path, Boolean(row.enabled)])); }
+
+  function putBrowserSession({ id = randomUUID(), currentUrl, title = '', history = [], snapshot = {} }) {
+    const now = new Date().toISOString();
+    db.prepare(`INSERT INTO browser_sessions (id, current_url, title, history_json, snapshot_json, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)
+      ON CONFLICT(id) DO UPDATE SET current_url=excluded.current_url, title=excluded.title, history_json=excluded.history_json, snapshot_json=excluded.snapshot_json, updated_at=excluded.updated_at`)
+      .run(id, currentUrl, title, JSON.stringify(history), JSON.stringify(snapshot), now, now);
+    return getBrowserSession(id);
+  }
+  function getBrowserSession(id) {
+    const row = db.prepare('SELECT * FROM browser_sessions WHERE id = ?').get(id);
+    return row ? { id: row.id, currentUrl: row.current_url, title: row.title, history: json(row.history_json, []), snapshot: json(row.snapshot_json, {}), createdAt: row.created_at, updatedAt: row.updated_at } : null;
+  }
+  function listBrowserSessions(limit = 30) { return db.prepare('SELECT id FROM browser_sessions ORDER BY updated_at DESC LIMIT ?').all(Math.max(1, Math.min(Number(limit) || 30, 100))).map(row => getBrowserSession(row.id)); }
+
   return {
-    db, createTask, getTask, listTasks, updateTask, addEvent, getEvents, addToolRun, getToolRuns,
+    db, createTask, getTask, listTasks, listChildTasks, updateTask, addEvent, getEvents, addToolRun, getToolRuns,
     createPermission, resolvePermission, getPermission, getPermissions, putMemory, listMemories, touchMemory, searchMemoriesText,
     replaceDocumentChunks, listDocumentChunks, searchDocumentChunksText, putSession, getSession, replaceTaskGraph, getTaskGraph,
     putCheckpoint, listCheckpoints, pruneCheckpoints, putRepositoryMap, getRepositoryMap, listInterruptedTasks,
+    addRuntimeEvent, listRuntimeEvents, createBackgroundJob, getBackgroundJob, listBackgroundJobs, listDueBackgroundJobs, updateBackgroundJob,
+    setSkillEnabled, getSkillStates, putBrowserSession, getBrowserSession, listBrowserSessions,
   };
 }

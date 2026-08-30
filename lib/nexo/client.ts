@@ -1,4 +1,4 @@
-import type { AgentHealth, AgentTask, Chat, UserProfile } from './types';
+import type { AgentHealth, AgentTask, BackgroundJob, Chat, NexoSkill, RuntimeEvent, UserProfile } from './types';
 
 export const NEXO_AGENT_URL = 'http://127.0.0.1:7331';
 
@@ -32,4 +32,9 @@ export class NexoClient {
   async indexText(source: string, content: string, metadata?: Record<string, unknown>) {
     return jsonResponse(await fetch(`${this.baseUrl}/agent/rag/text`, { method: 'POST', headers: this.headers(true), body: JSON.stringify({ source, content, metadata }) }));
   }
+  async listSkills() { return (await jsonResponse<{ skills: NexoSkill[] }>(await fetch(`${this.baseUrl}/agent/skills`, { headers: this.headers() }))).skills; }
+  async listBackgroundJobs(limit = 30) { return (await jsonResponse<{ jobs: BackgroundJob[] }>(await fetch(`${this.baseUrl}/agent/background/jobs?limit=${limit}`, { headers: this.headers() }))).jobs; }
+  async listEvents(after = 0, limit = 100) { return (await jsonResponse<{ events: RuntimeEvent[] }>(await fetch(`${this.baseUrl}/agent/events?after=${after}&limit=${limit}`, { headers: this.headers() }))).events; }
+  async listBrowserSessions() { return jsonResponse(await fetch(`${this.baseUrl}/agent/browser/sessions`, { headers: this.headers() })); }
+  async listMcpServers() { return jsonResponse(await fetch(`${this.baseUrl}/agent/mcp/servers`, { headers: this.headers() })); }
 }

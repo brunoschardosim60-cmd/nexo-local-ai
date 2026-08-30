@@ -5,12 +5,15 @@ O Nexo é tratado como runtime local-first. O modelo não é o agente: ele é um
 ## Fluxo
 
 ```text
-objetivo → Context Engine → Planner → Task Graph → Executor
-                                                ↓
-ambiente ← tool com contrato ← permissão ← policy engine
-   ↓
-observação → verifier → sucesso
-                  └→ falha → retry/replanner → executor
+Skills + RAG + memória → Context Engine
+                              ↓
+objetivo → Planner → Task Graph → Executor → policy → permissão → tool
+              ↓                         ↓                           ↓
+        especialista              agents.delegate              ambiente
+                                        ↓                           ↓
+                               até 4 subtask loops      observação → verifier
+                                                               ├→ sucesso
+                                                               └→ retry/replanner
 ```
 
 Cada run persiste objetivo, plano, nós, dependências, tentativas, observações, tool runs, permissões, eventos, checkpoints e resultado. `pause`, `resume` e `cancel` fazem parte do protocolo; tarefas interrompidas em `planning` ou `running` são retomadas na inicialização.
@@ -27,6 +30,11 @@ Cada run persiste objetivo, plano, nós, dependências, tentativas, observaçõe
 - Memória combina SQLite FTS, vetores locais, importância e confiança.
 - RAG é marcado como conteúdo não confiável e separado das instruções do runtime.
 - Repository Intelligence indexa arquivos, imports, exports, símbolos, rotas, scripts e relações sem ler segredos.
+- Pesquisa normaliza resultados de Wikipedia, OpenAlex e Stack Overflow com URL e evidência; acesso externo exige aprovação.
+- Navegação valida protocolo, credenciais, DNS, redirecionamentos, tamanho e redes privadas antes de ler uma página.
+- Browser sessions, runtime events, jobs e estado de skills sobrevivem a reinícios no SQLite.
+- MCP só inicia processos presentes no arquivo local de configuração e cada descoberta/chamada exige aprovação de execução.
+- Especialistas mudam foco e seleção de tools, mas nunca ampliam permissões.
 
 ## Sequência disciplinada
 
@@ -49,9 +57,15 @@ Cada run persiste objetivo, plano, nós, dependências, tentativas, observaçõe
 | 18. RAG | Concluído localmente |
 | 19. Memory Engine | Base híbrida concluída; esquecimento e consolidação automáticos ainda não |
 | 20. Model Router | Concluído para 3B/7B |
-| 21–27. Research, Browser, MCP, Skills, Coding avançado e visual verification | Próximas fases, nessa ordem |
-| 28. Multi-agent | Bloqueado por decisão arquitetural até o agente único amadurecer |
-| 29. Background/event architecture | Background local e eventos persistentes concluídos; scheduler/webhooks ainda não |
-| 30. Evals pesados | Suite estrutural inicial concluída; benchmarks longos ainda não |
+| 21. Research Agent | Base concluída com três fontes públicas, evidências e falhas parciais por provedor |
+| 22. Browser Agent | Base concluída com sessões, leitura segura, links observados e SSRF guard |
+| 23. MCP | Cliente stdio concluído para servidores locais configurados; Streamable HTTP ainda não |
+| 24. Skills | Concluído com descoberta, recuperação por intenção e ativação persistente |
+| 25. Coding Agent avançado | Base concluída com inspeção de repositório e pipeline restrito de validação; LSP/Tree-sitter ainda não |
+| 26. Preview + screenshots | Concluído via Chrome/Edge headless quando disponível |
+| 27. Visual verifier | Verificação estrutural concluída; análise semântica depende de futuro modelo local com visão |
+| 28. Multi-agent | Delegação paralela de até quatro subtarefas concluída, com vínculo pai/filho e permissões próprias; isolamento em processos separados ainda não |
+| 29. Background/event architecture | Scheduler, jobs e event bus persistentes concluídos; webhooks ainda não |
+| 30. Evals e benchmarks | 15 testes automatizados e suite determinística com oito critérios; benchmarks longos de qualidade ainda não |
 
-Não fazem parte desta fase: shell irrestrito, computer-use, Git destrutivo, dezenas de agentes, cloud automática ou integrações que enviem dados sem autorização.
+Não fazem parte desta fase: shell irrestrito, controle geral do sistema operacional, Git destrutivo, agentes paralelos sem isolamento, cloud automática ou integrações que enviem dados sem autorização.

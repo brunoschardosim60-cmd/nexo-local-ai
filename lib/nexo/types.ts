@@ -27,8 +27,12 @@ export type AgentPermission = {
 export type AgentTaskEvent = { id: string; sequence: number; type: string; level: string; message: string; createdAt: string };
 export type AgentTaskNode = AgentTaskStep & { taskId: string; parentId?: string | null; attempts: number; confidence?: number | null; model?: string | null };
 export type AgentCheckpoint = { id: string; taskId: string; sequence: number; kind: string; label: string; createdAt: string };
+export type NexoSkill = { id: string; name: string; description: string; path: string; enabled: boolean; instructionChars: number };
+export type BackgroundJob = { id: string; name: string; objective: string; scheduleType: 'once' | 'interval'; intervalSeconds?: number | null; nextRunAt: string; status: string; lastTaskId?: string | null; runCount: number };
+export type RuntimeEvent = { sequence: number; id: string; type: string; level: string; taskId?: string | null; source: string; data?: unknown; createdAt: string };
 export type AgentTask = {
   id: string; objective: string; status: string; plan: AgentTaskStep[]; graph?: AgentTaskNode[]; checkpoints?: AgentCheckpoint[];
+  parentTaskId?: string | null; assignedAgent?: string; children?: Array<{ id: string; objective: string; status: string; assignedAgent?: string }>;
   currentStep: number; stepsUsed: number; maxSteps: number; maxRetries: number;
   result?: { validated?: boolean; summary?: string; evidence?: string[]; remainingRisks?: string[] };
   error?: string; permissions: AgentPermission[]; events: AgentTaskEvent[];
@@ -41,6 +45,18 @@ export type AgentHealth = {
     runtime?: string; version?: string; persistent: boolean; database: string; tools: Array<{ name: string; risk: string }>;
     tasks: { total: number; running: number }; limits: { maxSteps: number; maxRetries: number };
     taskGraph?: boolean; checkpoints?: boolean; contextEngine?: boolean; repositoryIntelligence?: boolean;
+    capabilities?: {
+      research?: { providers: string[]; paidKeysRequired: boolean };
+      browser?: { available: boolean; engine?: string | null; screenshots: boolean; persistentSessions: boolean };
+      coding?: { checks: string[]; repositoryAware: boolean };
+      skills?: { loaded: number; enabled: number; roots: string[] };
+      specialists?: Array<{ id: string; label: string; purpose: string }>;
+      multiAgent?: { enabled: boolean; maxParallel: number; specialists: string[] };
+      mcp?: { configured: number; connected: number; transport: string };
+      background?: { active: number; total: number; running: boolean };
+      events?: { persistent: boolean; subscribers: number };
+      visualVerification?: boolean;
+    };
   };
 };
 

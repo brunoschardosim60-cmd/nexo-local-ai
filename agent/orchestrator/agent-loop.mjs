@@ -4,7 +4,7 @@ import { validateTaskLimits } from '../safety/policies.mjs';
 const TERMINAL = new Set(['completed', 'completed_with_warnings', 'failed', 'cancelled']);
 function completedPrefix(plan, index) { return plan.slice(0, index).filter(step => step.status === 'completed'); }
 
-export function createAgentLoop({ config, database, registry, permissionManager, planner, executor, evaluator, memory, rag, logger, taskGraph, checkpoints, contextEngine }) {
+export function createAgentLoop({ config, database, registry, permissionManager, planner, executor, evaluator, memory, rag, logger, taskGraph, checkpoints, contextEngine, eventBus = null }) {
   const backgroundRuns = new Map();
   const graph = taskGraph || { sync: () => [], get: () => [], validate: () => ({ valid: true, errors: [], nodeCount: 0 }) };
   const checkpointStore = checkpoints || { capture: () => null, list: () => [] };
@@ -12,7 +12,7 @@ export function createAgentLoop({ config, database, registry, permissionManager,
 
   function snapshot(taskId) {
     const task = database.getTask(taskId); if (!task) return null;
-    return { ...task, graph: graph.get(taskId), checkpoints: checkpointStore.list(taskId, 10), events: database.getEvents(taskId), toolRuns: database.getToolRuns(taskId), permissions: permissionManager.list(taskId) };
+    return { ...task, children: database.listChildTasks?.(taskId) || [], graph: graph.get(taskId), checkpoints: checkpointStore.list(taskId, 10), events: database.getEvents(taskId), toolRuns: database.getToolRuns(taskId), permissions: permissionManager.list(taskId) };
   }
 
   function enqueue(taskId, operation) {
@@ -26,9 +26,11 @@ export function createAgentLoop({ config, database, registry, permissionManager,
   function initializeTask(objective, options = {}) {
     if (typeof objective !== 'string' || objective.trim().length < 5 || objective.length > 4000) throw new Error('Objetivo inválido.');
     const limits = validateTaskLimits(options, config.limits);
-    const task = database.createTask({ objective: objective.trim(), ...limits });
+    const assignedAgent = options.assignedAgent || 'general';
+    const task = database.createTask({ objective: objective.trim(), ...limits, parentTaskId: options.parentTaskId || null, assignedAgent });
     database.addEvent(task.id, 'run.started', 'Execução autônoma iniciada.', { runtime: 'nexo-core-v1' });
     database.addEvent(task.id, 'task.created', 'Tarefa criada e salva localmente.', limits);
+    void eventBus?.publish('task.created', { objective: task.objective, limits, parentTaskId: task.parentTaskId, assignedAgent }, { taskId: task.id, source: 'agent-loop' });
     checkpointStore.capture(task.id, 'initial', 'Objetivo recebido');
     void logger.info('task.created', { taskId: task.id, objective: task.objective, ...limits }).catch(() => undefined);
     return task;
@@ -39,7 +41,7 @@ export function createAgentLoop({ config, database, registry, permissionManager,
       let task = database.getTask(taskId); if (!task) throw new Error('Tarefa não encontrada.');
       if (task.plan.length) return run(taskId);
       const context = await contexts.build({ objective: task.objective, task, events: database.getEvents(taskId), runs: database.getToolRuns(taskId) });
-      const plan = await planner.createPlan({ objective: task.objective, tools: registry.describe(), memories: context.memories, documents: context.documents, context });
+      const plan = await planner.createPlan({ objective: task.objective, preferredSpecialist: task.assignedAgent, tools: registry.describe(), memories: context.memories, documents: context.documents, context });
       task = database.updateTask(task.id, { plan, status: 'running' }); graph.sync(task.id, plan);
       const graphValidation = graph.validate(task.id); if (!graphValidation.valid) throw new Error(`Grafo de tarefas inválido: ${graphValidation.errors.join(' ')}`);
       database.addEvent(task.id, 'plan.created', `Plano criado com ${plan.length} etapas.`, { steps: plan.map(step => step.title), graph: graphValidation });
@@ -53,6 +55,7 @@ export function createAgentLoop({ config, database, registry, permissionManager,
     database.updateTask(task.id, { status, result: validation, completedAt });
     database.addEvent(task.id, 'run.completed', validation.summary || 'Tarefa concluída.', validation, validation.validated ? 'info' : 'warn');
     database.addEvent(task.id, 'task.completed', validation.summary || 'Tarefa concluída.', validation, validation.validated ? 'info' : 'warn');
+    await eventBus?.publish('task.completed', validation, { taskId: task.id, source: 'agent-loop', level: validation.validated ? 'info' : 'warn' });
     checkpointStore.capture(task.id, 'final', validation.validated ? 'Resultado verificado' : 'Resultado com alertas');
     memory.remember(`Objetivo: ${task.objective}\nResultado: ${validation.summary}\nEvidências: ${validation.evidence.join('; ')}`, {
       kind: 'episodic', importance: validation.validated ? 0.78 : 0.55, confidence: validation.validated ? 0.9 : 0.55,
@@ -65,6 +68,7 @@ export function createAgentLoop({ config, database, registry, permissionManager,
     const task = database.getTask(taskId); if (!task || TERMINAL.has(task.status)) return snapshot(taskId);
     database.updateTask(taskId, { status: 'failed', error, completedAt: new Date().toISOString() });
     database.addEvent(taskId, 'task.failed', error, null, 'error'); checkpointStore.capture(taskId, 'failure', 'Falha persistida');
+    await eventBus?.publish('task.failed', { error }, { taskId, source: 'agent-loop', level: 'error' });
     await logger.error('task.failed', { taskId, error }); return snapshot(taskId);
   }
 
@@ -116,6 +120,7 @@ export function createAgentLoop({ config, database, registry, permissionManager,
           const plan = [...task.plan]; plan[stepIndex] = { ...step, permissionId: permission.id, status: 'awaiting_approval' };
           database.updateTask(taskId, { plan, status: 'awaiting_approval' }); graph.sync(taskId, plan);
           database.addEvent(taskId, 'permission.requested', `${policy.reason} Escopo: ${policy.scope}`, { permissionId: permission.id, tool: tool.name, input: step.action.input }, 'warn');
+          void eventBus?.publish('permission.requested', { permissionId: permission.id, tool: tool.name, scope: policy.scope }, { taskId, source: 'agent-loop', level: 'warn' });
           checkpointStore.capture(taskId, 'permission', `Aguardando aprovação para ${tool.name}`);
           await logger.warn('permission.requested', { taskId, permissionId: permission.id, tool: tool.name, scope: policy.scope }); return snapshot(taskId);
         }

@@ -54,6 +54,13 @@ const server = createServer(async (request, response) => {
     if (request.method === 'GET' && url.pathname === '/agent/rag/search') return send(response, 200, { ok: true, chunks: core.rag.search(url.searchParams.get('q') || '', Math.min(Number(url.searchParams.get('limit')) || 8, 30)) });
     if (request.method === 'GET' && url.pathname === '/agent/repository/map') return send(response, 200, { ok: true, repository: await core.repository.build(url.searchParams.get('path') || '.') });
     if (request.method === 'GET' && url.pathname === '/agent/repository/symbols') return send(response, 200, { ok: true, symbols: await core.repository.findSymbol(url.searchParams.get('q') || '', url.searchParams.get('path') || '.') });
+    if (request.method === 'GET' && url.pathname === '/agent/events') return send(response, 200, { ok: true, events: core.eventBus.list({ after: Number(url.searchParams.get('after')) || 0, limit: Math.min(Number(url.searchParams.get('limit')) || 100, 500), type: url.searchParams.get('type') || null }) });
+    if (request.method === 'GET' && url.pathname === '/agent/skills') { await core.skills.ready(); return send(response, 200, { ok: true, skills: core.skills.list() }); }
+    if (request.method === 'GET' && url.pathname === '/agent/background/jobs') return send(response, 200, { ok: true, jobs: core.scheduler.list(Math.min(Number(url.searchParams.get('limit')) || 30, 100)) });
+    if (request.method === 'GET' && url.pathname === '/agent/browser/sessions') return send(response, 200, { ok: true, sessions: core.browser.sessions(Math.min(Number(url.searchParams.get('limit')) || 30, 100)) });
+    if (request.method === 'GET' && url.pathname === '/agent/mcp/servers') return send(response, 200, { ok: true, servers: core.mcp.servers() });
+    if (request.method === 'GET' && url.pathname === '/agent/specialists') return send(response, 200, { ok: true, specialists: core.specialists.list() });
+    if (request.method === 'GET' && url.pathname === '/agent/subtasks') return send(response, 200, { ok: true, subtasks: core.database.listChildTasks(url.searchParams.get('parentTaskId') || '') });
 
     const sessionMatch = url.pathname.match(/^\/agent\/sessions\/([^/]+)$/);
     if (request.method === 'GET' && sessionMatch) return send(response, 200, { ok: true, session: core.database.getSession(sessionMatch[1]) });
@@ -97,7 +104,7 @@ const server = createServer(async (request, response) => {
 
 server.listen(PORT, '127.0.0.1', () => {
   console.log(`Nexo Core ativo em http://127.0.0.1:${PORT}`); console.log(`Área permitida: ${WORKSPACE}`);
-  console.log('Proteções: loopback, token, contratos de tools, aprovação, sandbox, checkpoints e auditoria.');
+  console.log('Proteções: loopback, token, contratos, aprovação, sandbox, SSRF guard, checkpoints e auditoria.');
 });
 
 function shutdown() { server.close(() => { core.close(); process.exit(0); }); }
