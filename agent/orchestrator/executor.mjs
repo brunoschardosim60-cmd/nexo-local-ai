@@ -1,3 +1,5 @@
+import { classifyFailure, ERROR_KIND, recoveryPolicy } from './errors.mjs';
+
 export function createExecutor({ registry, database, logger, maxOutput }) {
   return {
     async execute({ taskId, stepIndex, action, maxRetries }) {
@@ -15,8 +17,10 @@ export function createExecutor({ registry, database, logger, maxOutput }) {
         } catch (error) {
           lastError = error instanceof Error ? error.message : 'Falha desconhecida.';
           const durationMs = performance.now() - startedAt;
-          database.addToolRun({ taskId, stepIndex, tool: action.tool, input: action.input, status: 'failed', attempt, durationMs, error: lastError });
-          await logger.warn('tool.failed', { taskId, stepIndex, tool: action.tool, attempt, error: lastError });
+          const errorKind = classifyFailure(lastError, { phase: 'tool' }); const recovery = recoveryPolicy(errorKind, attempt);
+          database.addToolRun({ taskId, stepIndex, tool: action.tool, input: action.input, status: 'failed', attempt, durationMs, error: lastError, errorKind });
+          await logger.warn('tool.failed', { taskId, stepIndex, tool: action.tool, attempt, error: lastError, errorKind, recovery: recovery.action });
+          if (!recovery.retry || errorKind !== ERROR_KIND.TRANSIENT) break;
         }
       }
       return { ok: false, error: lastError || 'Ferramenta falhou.' };

@@ -2,6 +2,7 @@ import { createHash } from 'node:crypto';
 import { readFile, readdir, stat } from 'node:fs/promises';
 import { extname, join, relative, resolve, sep } from 'node:path';
 import { defineTool } from '../tools/contracts.mjs';
+import ts from 'typescript';
 
 const SOURCE_EXTENSIONS = new Set(['.js', '.jsx', '.mjs', '.cjs', '.ts', '.tsx', '.py', '.html', '.css', '.sql']);
 const IGNORED = new Set(['node_modules', '.git', '.next', '.vinext', 'dist', 'out', 'coverage', '.wrangler', 'data', '.nexo-backups']);
@@ -15,12 +16,30 @@ function ensureInside(workspace, input = '.') {
 
 function extractSymbols(content, path) {
   const symbols = []; const lines = content.split(/\r?\n/);
+  const extension = extname(path).toLowerCase();
+  const calls = [];
+  if (['.js', '.jsx', '.mjs', '.cjs', '.ts', '.tsx'].includes(extension)) {
+    const kind = extension === '.tsx' ? ts.ScriptKind.TSX : extension === '.jsx' ? ts.ScriptKind.JSX : extension === '.ts' ? ts.ScriptKind.TS : ts.ScriptKind.JS;
+    const source = ts.createSourceFile(path, content, ts.ScriptTarget.Latest, true, kind);
+    const add = (node, name, symbolKind) => {
+      if (!name) return;
+      symbols.push({ name, kind: symbolKind, path, line: source.getLineAndCharacterOfPosition(node.getStart(source)).line + 1 });
+    };
+    const visit = node => {
+      if (ts.isFunctionDeclaration(node)) add(node, node.name?.text, 'function');
+      else if (ts.isClassDeclaration(node)) add(node, node.name?.text, 'class');
+      else if (ts.isInterfaceDeclaration(node)) add(node, node.name.text, 'interface');
+      else if (ts.isTypeAliasDeclaration(node)) add(node, node.name.text, 'type');
+      else if (ts.isVariableDeclaration(node) && node.initializer && (ts.isArrowFunction(node.initializer) || ts.isFunctionExpression(node.initializer))) add(node, node.name.getText(source), 'variable');
+      else if (ts.isCallExpression(node)) {
+        const expression = node.expression; const name = ts.isIdentifier(expression) ? expression.text : ts.isPropertyAccessExpression(expression) ? expression.name.text : null;
+        if (name) calls.push({ name, path, line: source.getLineAndCharacterOfPosition(node.getStart(source)).line + 1 });
+      }
+      ts.forEachChild(node, visit);
+    };
+    visit(source);
+  }
   const patterns = [
-    ['function', /\b(?:export\s+)?(?:async\s+)?function\s+([A-Za-z_$][\w$]*)/g],
-    ['class', /\b(?:export\s+)?class\s+([A-Za-z_$][\w$]*)/g],
-    ['interface', /\b(?:export\s+)?interface\s+([A-Za-z_$][\w$]*)/g],
-    ['type', /\b(?:export\s+)?type\s+([A-Za-z_$][\w$]*)\s*=/g],
-    ['variable', /\b(?:export\s+)?const\s+([A-Za-z_$][\w$]*)\s*=\s*(?:async\s*)?(?:\([^)]*\)|[A-Za-z_$][\w$]*)\s*=>/g],
     ['python-function', /^\s*(?:async\s+)?def\s+([A-Za-z_][\w]*)\s*\(/gm],
     ['python-class', /^\s*class\s+([A-Za-z_][\w]*)\s*[:(]/gm],
   ];
@@ -33,7 +52,7 @@ function extractSymbols(content, path) {
   const imports = [...content.matchAll(/(?:from\s+|require\s*\(\s*)['"]([^'"]+)['"]/g)].map(match => match[1]).slice(0, 200);
   const exports = [...content.matchAll(/\bexport\s+(?:default\s+)?(?:async\s+)?(?:function|class|const|let|var|type|interface)?\s*([A-Za-z_$][\w$]*)?/g)].map(match => match[1] || 'default').slice(0, 200);
   const route = /(^|[\\/])app[\\/].*[\\/](?:page|route)\.(?:js|jsx|ts|tsx)$/.test(path) ? path.replace(/^.*?app[\\/]?/, '/').replace(/[\\/](?:page|route)\.(?:js|jsx|ts|tsx)$/, '').replace(/\\/g, '/') || '/' : null;
-  return { symbols, imports, exports, route, lines: lines.length };
+  return { symbols, imports, exports, calls, route, lines: lines.length };
 }
 
 export function createRepositoryIntelligence({ workspace, database }) {
@@ -63,15 +82,16 @@ export function createRepositoryIntelligence({ workspace, database }) {
     const fingerprint = createHash('sha256').update(files.map(file => `${file.path}:${file.size}:${file.mtimeMs}`).join('|')).digest('hex');
     const rootKey = relative(workspace, root) || '.'; const cached = database.getRepositoryMap(rootKey);
     if (!refresh && cached?.fingerprint === fingerprint) { recent = { root: rootKey, at: Date.now(), map: cached.map }; return { ...cached.map, cached: true }; }
-    const entries = []; const symbols = []; const routes = []; const relations = [];
+    const entries = []; const symbols = []; const calls = []; const routes = []; const relations = [];
     for (const file of files) {
       const entry = { path: file.path, size: file.size, extension: file.extension, imports: [], exports: [], symbols: [], lines: null };
       if (SOURCE_EXTENSIONS.has(file.extension) && file.size <= 750_000) {
         try {
           const content = await readFile(file.absolute, 'utf8'); const extracted = extractSymbols(content, file.path);
           entry.imports = extracted.imports; entry.exports = extracted.exports; entry.symbols = extracted.symbols.map(symbol => symbol.name); entry.lines = extracted.lines;
-          symbols.push(...extracted.symbols); if (extracted.route) routes.push({ route: extracted.route, path: file.path });
+          symbols.push(...extracted.symbols); calls.push(...extracted.calls); if (extracted.route) routes.push({ route: extracted.route, path: file.path });
           for (const dependency of extracted.imports) relations.push({ from: file.path, type: 'imports', to: dependency });
+          for (const call of extracted.calls) relations.push({ from: file.path, type: 'calls', to: call.name, line: call.line });
         } catch { /* arquivo ilegível é mantido apenas no inventário */ }
       }
       entries.push(entry);
@@ -82,7 +102,7 @@ export function createRepositoryIntelligence({ workspace, database }) {
       const parsed = JSON.parse(await readFile(packageFile.absolute, 'utf8'));
       manifest = { path: packageFile.path, name: parsed.name || null, scripts: parsed.scripts || {}, dependencies: Object.keys(parsed.dependencies || {}), devDependencies: Object.keys(parsed.devDependencies || {}) };
     } catch { /* package.json inválido */ }
-    const map = { root: rootKey, fingerprint, generatedAt: new Date().toISOString(), files: entries, symbols, routes, relations, manifest, stats: { files: entries.length, sourceFiles: entries.filter(file => SOURCE_EXTENSIONS.has(file.extension)).length, symbols: symbols.length, routes: routes.length } };
+    const map = { root: rootKey, fingerprint, generatedAt: new Date().toISOString(), files: entries, symbols, calls, routes, relations, manifest, stats: { files: entries.length, sourceFiles: entries.filter(file => SOURCE_EXTENSIONS.has(file.extension)).length, symbols: symbols.length, calls: calls.length, routes: routes.length } };
     database.putRepositoryMap(rootKey, fingerprint, map); recent = { root: rootKey, at: Date.now(), map }; return { ...map, cached: false };
   }
 
@@ -103,8 +123,16 @@ export function createRepositoryIntelligence({ workspace, database }) {
     return results;
   }
 
+  async function symbolContext(symbol, root = '.') {
+    const map = await build(root); const needle = String(symbol).toLowerCase();
+    const declarations = map.symbols.filter(item => item.name.toLowerCase() === needle);
+    const references = await findReferences(symbol, root);
+    const callers = (map.calls || []).filter(call => call.name.toLowerCase() === needle);
+    return { symbol, declarations, callers, references, confidence: declarations.length ? 0.9 : references.length ? 0.55 : 0, engine: 'TypeScript AST + textual references' };
+  }
+
   return {
-    build, findSymbol, findReferences,
+    build, findSymbol, findReferences, symbolContext,
     tools: [
       defineTool({
         name: 'repository.map', description: 'Cria ou recupera o mapa estrutural do repositório: arquivos, símbolos, imports, rotas e scripts.', risk: 'read',
@@ -120,6 +148,11 @@ export function createRepositoryIntelligence({ workspace, database }) {
         name: 'code.find_references', description: 'Encontra referências textuais exatas de um símbolo no repositório.', risk: 'read',
         inputSchema: { type: 'object', properties: { symbol: { type: 'string', minLength: 1, maxLength: 200 }, path: { type: 'string', maxLength: 1000 } }, required: ['symbol'], additionalProperties: false },
         execute: input => findReferences(input.symbol, input.path || '.'),
+      }),
+      defineTool({
+        name: 'code.symbol_context', description: 'Combina AST TypeScript/JavaScript, declarações, chamadas e referências para entender um símbolo antes de editar.', risk: 'read',
+        inputSchema: { type: 'object', properties: { symbol: { type: 'string', minLength: 1, maxLength: 200 }, path: { type: 'string', maxLength: 1000 } }, required: ['symbol'], additionalProperties: false },
+        execute: input => symbolContext(input.symbol, input.path || '.'),
       }),
     ],
   };

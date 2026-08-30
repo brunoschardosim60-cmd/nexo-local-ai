@@ -20,6 +20,8 @@ test('Research Agent normaliza fontes e bloqueia SSRF', async () => {
   const research = createResearchAgent({ fetchImpl });
   const result = await research.search({ query: 'Nexo', sources: ['wikipedia'], limit: 2 });
   assert.equal(result.results[0].source, 'wikipedia'); assert.equal(result.results[0].snippet, 'Assistente local'); assert.match(result.results[0].url, /wikipedia/);
+  const investigation = await research.investigate({ question: 'Compare Nexo versus assistentes locais', sources: ['wikipedia'], limitPerQuery: 1 });
+  assert.ok(investigation.queries.length >= 2); assert.ok(investigation.evidence.length >= 1); assert.equal(investigation.sourceCoverage.wikipedia >= 1, true);
   await assert.rejects(() => assertSafeUrl('http://127.0.0.1/admin'), /privados|localhost/);
   await assert.rejects(() => assertSafeUrl('file:///etc/passwd'), /HTTP/);
 });

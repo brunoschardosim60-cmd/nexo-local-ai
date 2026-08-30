@@ -1,8 +1,11 @@
-export type MessageKind = 'text' | 'sheet' | 'image' | 'action' | 'task';
+export type MessageKind = 'text' | 'sheet' | 'image' | 'video' | 'audio' | 'action' | 'task' | 'unavailable';
+export type LocalAttachment = { type: 'image' | 'audio' | 'video'; name: string; mimeType: string; dataUrl: string };
+export type MediaArtifact = { id: string; type: 'image' | 'video' | 'audio'; mimeType: string; provider: string; model?: string | null; metadata?: Record<string, unknown> };
 export type Effort = 'Baixo' | 'Médio' | 'Alto' | 'Extra alto';
 export type ChatMessage = {
   role: 'user' | 'assistant'; content: string; kind?: MessageKind;
   elapsedMs?: number; firstTokenMs?: number; effort?: Effort; model?: string; sourcePrompt?: string;
+  artifact?: MediaArtifact; attachments?: Array<Omit<LocalAttachment, 'dataUrl'>>;
 };
 export type Chat = { id: string; title: string; messages: ChatMessage[]; updatedAt: number };
 export type LocalDocument = { name: string; content: string };
@@ -19,7 +22,10 @@ export type RuntimeStreamEvent =
   | { type: 'error'; error: string };
 export type RuntimeImmediateResponse =
   | { ok: true; kind: 'instant'; route: 'instant'; content: string; model: string; context: string }
-  | { ok: true; kind: 'task'; route: 'agent'; task: AgentTask; model: string; context: string };
+  | { ok: true; kind: 'task'; route: 'agent'; task: AgentTask; model: string; context: string }
+  | { ok: true; kind: 'unavailable'; route: 'media'; mediaKind: 'image' | 'video' | 'audio'; content: string; model: string; availability?: { error?: string } }
+  | { ok: true; kind: 'media'; route: 'media'; mediaKind: 'image' | 'video' | 'audio'; content: string; model: string; job: MediaJob };
+export type MediaJob = { id: string; kind: 'image' | 'video' | 'tts'; status: 'queued' | 'running' | 'completed' | 'failed' | 'cancelled'; artifactId?: string | null; error?: string | null };
 
 export type NexoAction = {
   type: 'write_file' | 'create_folder' | 'read_file' | 'list_files' | 'create_project';
@@ -75,6 +81,7 @@ export type AgentHealth = {
       background?: { active: number; total: number; running: boolean };
       events?: { persistent: boolean; subscribers: number };
       visualVerification?: boolean;
+      vision?: Record<string, unknown>; image?: Record<string, unknown>; video?: Record<string, unknown>; audio?: Record<string, unknown>; mediaQueue?: Record<string, unknown>;
     };
   };
 };

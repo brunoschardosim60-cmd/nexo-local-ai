@@ -1,9 +1,9 @@
 'use client';
-/* oxlint-disable react/react-compiler */
+/* oxlint-disable react/react-compiler jsx-a11y/media-has-caption */
 
 import { ChangeEvent, type ReactNode, useEffect, useMemo, useRef, useState } from 'react';
 import {
-  ArrowUp, Bot, Check, Clock3, CloudSun, Code2, Copy, Download, Gauge,
+  ArrowUp, Bot, Check, Clock3, CloudSun, Code2, Copy, Download, Film, Gauge,
   FilePenLine, FileText, FolderPlus, Globe2, ImageIcon, Library, Menu, Mic, MicOff,
   Moon, Network, Paperclip, Plus, RefreshCw, Search, Server, Settings2, ShieldCheck, Sparkles,
   Sun, Table2, Trash2, Volume2, VolumeX, X,
@@ -13,7 +13,7 @@ import { useNexoTaskSync } from '@/hooks/use-nexo-task-sync';
 import { NexoClient, NEXO_AGENT_URL } from '@/lib/nexo/client';
 import {
   parseAgentTask, taskStatusLabel, type AgentHealth, type AgentPermission, type AgentTask,
-  type Chat, type ChatMessage, type Effort, type LocalDocument, type MessageKind, type NexoAction, type UserProfile,
+  type Chat, type ChatMessage, type Effort, type LocalAttachment, type LocalDocument, type MediaArtifact, type MessageKind, type NexoAction, type UserProfile,
 } from '@/lib/nexo/types';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -51,6 +51,7 @@ const MODES = [
   { label: 'Documentos', icon: FileText },
   { label: 'Planilhas', icon: Table2 },
   { label: 'Imagens', icon: ImageIcon },
+  { label: 'Vídeos', icon: Film },
   { label: 'Agente', icon: Bot },
 ];
 
@@ -255,6 +256,7 @@ export default function Home() {
   const [chats, setChats] = useState<Chat[]>([]);
   const [activeChatId, setActiveChatId] = useState('');
   const [documents, setDocuments] = useState<LocalDocument[]>([]);
+  const [attachments, setAttachments] = useState<LocalAttachment[]>([]);
   const [webSearch, setWebSearch] = useState(false);
   const [listening, setListening] = useState(false);
   const [voiceOutput, setVoiceOutput] = useState(false);
@@ -412,14 +414,36 @@ export default function Home() {
 
   async function addDocuments(event: ChangeEvent<HTMLInputElement>) {
     const accepted: LocalDocument[] = [];
+    const media: LocalAttachment[] = [];
     for (const file of Array.from(event.target.files ?? [])) {
+      if (/^(image|audio|video)\//.test(file.type)) {
+        if (file.size > 8_000_000) { setNotice(`${file.name} é maior que 8 MB e não foi anexado.`); continue; }
+        try {
+          const dataUrl = await new Promise<string>((resolve, reject) => { const reader = new FileReader(); reader.onload = () => typeof reader.result === 'string' ? resolve(reader.result) : reject(new Error('Formato inválido.')); reader.onerror = () => reject(reader.error); reader.readAsDataURL(file); });
+          media.push({ type: file.type.split('/')[0] as LocalAttachment['type'], name: file.name, mimeType: file.type, dataUrl });
+        } catch { setNotice(`Não consegui ler ${file.name}.`); }
+        continue;
+      }
       if (file.size > 2_000_000) { setNotice(`${file.name} é maior que 2 MB e não foi adicionado.`); continue; }
       try { accepted.push({ name: file.name, content: (await file.text()).slice(0, 40_000) }); } catch { setNotice(`Não consegui ler ${file.name}.`); }
     }
     setDocuments(current => [...current, ...accepted].slice(-8)); event.target.value = '';
+    setAttachments(current => [...current, ...media].slice(-4));
     if (agentToken) for (const document of accepted) {
       void new NexoClient(agentToken).indexText(`upload:${document.name}`, document.content, { uploadedFromBrowser: true, trust: 'untrusted' }).catch(() => undefined);
     }
+  }
+
+  async function waitForMedia(client: NexoClient, jobId: string) {
+    const deadline = Date.now() + 10 * 60_000;
+    while (Date.now() < deadline) {
+      const job = await client.getMediaJob(jobId);
+      setActivityLabel(job.status === 'queued' ? 'Na fila de mídia local…' : job.status === 'running' ? 'Gerando no seu computador…' : 'Finalizando artefato…');
+      if (job.status === 'completed' && job.artifactId) { const artifact = await client.getArtifact(job.artifactId); if (!artifact) throw new Error('O artefato terminou, mas não foi encontrado.'); return artifact; }
+      if (job.status === 'failed' || job.status === 'cancelled') throw new Error(job.error || `Geração ${job.status}.`);
+      await new Promise(resolve => window.setTimeout(resolve, 900));
+    }
+    throw new Error('A geração ultrapassou 10 minutos. O job permanece salvo no Nexo Core.');
   }
 
 
@@ -534,7 +558,8 @@ export default function Home() {
     setLoading(true); setNotice(''); setPrompt('');
 
     const baseChat = activeChat ?? { id: crypto.randomUUID(), title: question.slice(0, 42), messages: [], updatedAt: Date.now() };
-    const userMessage: ChatMessage = { role: 'user', content: question, kind: 'text' };
+    const requestAttachments = attachments;
+    const userMessage: ChatMessage = { role: 'user', content: question, kind: 'text', attachments: requestAttachments.map(({ type, name, mimeType }) => ({ type, name, mimeType })) };
     const pendingChat = { ...baseChat, title: baseChat.messages.length ? baseChat.title : question.slice(0, 42), messages: [...baseChat.messages, userMessage], updatedAt: Date.now() };
     persistChats([pendingChat, ...chats.filter(chat => chat.id !== baseChat.id)]); setActiveChatId(baseChat.id);
 
@@ -542,9 +567,9 @@ export default function Home() {
       if (!agentOnline || !agentToken) throw new Error('O Nexo Runtime está offline. Inicie o Nexo novamente.');
       const effectiveModeV3 = mode === 'Imagens' || isImageCreationRequest(question, baseChat.messages) ? 'Imagens' : mode;
       const displayStreamingV3 = !['Imagens', 'Planilhas'].includes(effectiveModeV3);
-      let responseTextV3 = ''; let firstTokenV3: number | undefined; let modelLabelV3 = 'Nexo Runtime V3';
+      let responseTextV3 = ''; let firstTokenV3: number | undefined; let modelLabelV3 = 'Nexo Runtime V4';
       const immediate = await new NexoClient(agentToken).streamChat({
-        question, mode: effectiveModeV3, effort, profile, history: baseChat.messages, documents, webSearch,
+        question, mode: effectiveModeV3, effort, profile, history: baseChat.messages, documents, attachments: requestAttachments, webSearch,
         weather: weather ? { ...weather, description: weatherDescription(weather.code) } : null,
       }, event => {
         if (event.type === 'meta') {
@@ -570,25 +595,32 @@ export default function Home() {
         setNotice(task.status === 'awaiting_approval' ? 'O agente aguarda sua aprovação.' : `Tarefa: ${taskStatusLabel(task.status)}.`);
         return;
       }
+      if (immediate?.kind === 'unavailable') {
+        const elapsedMs = performance.now() - requestStarted;
+        const completeChat = { ...pendingChat, messages: [...pendingChat.messages, { role: 'assistant' as const, content: immediate.content, kind: 'unavailable' as const, elapsedMs, firstTokenMs: elapsedMs, effort, model: immediate.model }], updatedAt: Date.now() };
+        persistChats([completeChat, ...chats.filter(chat => chat.id !== baseChat.id)]); return;
+      }
+      if (immediate?.kind === 'media') {
+        const artifact: MediaArtifact = await waitForMedia(new NexoClient(agentToken), immediate.job.id); const elapsedMs = performance.now() - requestStarted;
+        const completeChat = { ...pendingChat, messages: [...pendingChat.messages, { role: 'assistant' as const, content: `Artefato criado por ${artifact.provider}.`, kind: artifact.type as MessageKind, artifact, elapsedMs, firstTokenMs: elapsedMs, effort, model: artifact.model || immediate.model, sourcePrompt: question }], updatedAt: Date.now() };
+        persistChats([completeChat, ...chats.filter(chat => chat.id !== baseChat.id)]); return;
+      }
       if (immediate?.kind === 'instant') {
         const elapsedMs = performance.now() - requestStarted;
         const completeChat = { ...pendingChat, messages: [...pendingChat.messages, { role: 'assistant' as const, content: immediate.content, kind: 'text' as const, elapsedMs, firstTokenMs: elapsedMs, effort, model: 'Nexo Instant' }], updatedAt: Date.now() };
         persistChats([completeChat, ...chats.filter(chat => chat.id !== baseChat.id)]); speak(immediate.content); return;
       }
-      responseTextV3 = responseTextV3.trim(); if (!responseTextV3) throw new Error('O Runtime V3 não produziu uma resposta.');
-      if (effectiveModeV3 === 'Imagens') {
-        const candidate = cleanSvg(responseTextV3); responseTextV3 = hasDetailedVisual(candidate) ? candidate : fallbackSvg(question);
-      }
-      const kindV3: MessageKind = effectiveModeV3 === 'Planilhas' ? 'sheet' : effectiveModeV3 === 'Imagens' ? 'image' : 'text';
+      responseTextV3 = responseTextV3.trim(); if (!responseTextV3) throw new Error('O Runtime V4 não produziu uma resposta.');
+      const kindV3: MessageKind = effectiveModeV3 === 'Planilhas' ? 'sheet' : 'text';
       if (kindV3 === 'text') responseTextV3 = polishPortuguese(responseTextV3);
       const elapsedMsV3 = performance.now() - requestStarted;
-      const completeChatV3 = { ...pendingChat, messages: [...pendingChat.messages, { role: 'assistant' as const, content: responseTextV3, kind: kindV3, elapsedMs: elapsedMsV3, firstTokenMs: firstTokenV3 ?? elapsedMsV3, effort, model: modelLabelV3, sourcePrompt: kindV3 === 'image' ? question : undefined }], updatedAt: Date.now() };
+      const completeChatV3 = { ...pendingChat, messages: [...pendingChat.messages, { role: 'assistant' as const, content: responseTextV3, kind: kindV3, elapsedMs: elapsedMsV3, firstTokenMs: firstTokenV3 ?? elapsedMsV3, effort, model: modelLabelV3 }], updatedAt: Date.now() };
       persistChats([completeChatV3, ...chats.filter(chat => chat.id !== baseChat.id)]);
       if (kindV3 === 'text') speak(responseTextV3);
       return;
     } catch (error) {
       setNotice(error instanceof Error ? error.message : 'Não consegui acessar o modelo local. Confirme se o Ollama está aberto e tente novamente.');
-    } finally { setLoading(false); }
+    } finally { setLoading(false); setAttachments([]); }
   }
 
   const sidebar = (
@@ -645,13 +677,16 @@ export default function Home() {
               </div> : <div className="space-y-5 py-2">
                 {history.map((message, index) => {
                   const imagePrompt = message.sourcePrompt ?? (history[index - 1]?.role === 'user' ? history[index - 1].content : '');
-                  const cleanedSvg = message.kind === 'image' ? cleanSvg(message.content) : '';
-                  const svg = message.kind === 'image' ? hasDetailedVisual(cleanedSvg) ? cleanedSvg : fallbackSvg(imagePrompt) : '';
+                  const cleanedSvg = message.kind === 'image' && !message.artifact ? cleanSvg(message.content) : '';
+                  const svg = message.kind === 'image' && !message.artifact ? hasDetailedVisual(cleanedSvg) ? cleanedSvg : fallbackSvg(imagePrompt) : '';
                   const streaming = loading && index === history.length - 1 && message.role === 'assistant';
                   return <article key={`${message.role}-${index}`} className={`flex gap-3 ${message.role === 'user' ? 'justify-end' : 'justify-start'}`}>
                     {message.role === 'assistant' && <div className="nexo-logo mt-1 grid size-7 shrink-0 place-items-center rounded-lg text-white"><NexoMark className="size-4" /></div>}
                     <div className={`max-w-[88%] rounded-2xl px-4 py-3 text-sm leading-6 sm:max-w-[82%] ${message.role === 'user' ? 'rounded-br-md bg-primary text-primary-foreground' : 'assistant-message rounded-bl-md border border-border bg-card/80'}`}>
-                      {message.kind === 'image' && svg ? <><Image unoptimized width={1024} height={1024} className="aspect-square w-full rounded-xl bg-white object-contain" src={`data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}`} alt="Imagem criada pelo Nexo" /><div className="mt-3 flex flex-wrap gap-2"><Button size="sm" variant="outline" onClick={() => download(svg, 'imagem-nexo.svg', 'image/svg+xml')}><Download /> Baixar SVG</Button>{imagePrompt && <Button size="sm" variant="ghost" onClick={() => { setMode('Imagens'); setPrompt(`Crie uma nova versão mais detalhada de: ${imagePrompt}`); }}><RefreshCw /> Criar variação</Button>}</div></>
+                      {message.artifact?.type === 'image' ? <><Image unoptimized width={1024} height={1024} className="max-h-[560px] w-full rounded-xl bg-black/5 object-contain" src={new NexoClient(agentToken).artifactUrl(message.artifact.id)} alt={message.sourcePrompt || 'Imagem criada pelo Nexo'} /><div className="mt-3 flex flex-wrap gap-2"><a className="inline-flex h-7 items-center gap-1 rounded-lg border border-border px-2.5 text-xs" href={new NexoClient(agentToken).artifactUrl(message.artifact.id)} download><Download className="size-3.5" /> Baixar imagem</a>{imagePrompt && <Button size="sm" variant="ghost" onClick={() => { setMode('Imagens'); setPrompt(`Crie uma variação de: ${imagePrompt}`); }}><RefreshCw /> Criar variação</Button>}</div></>
+                        : message.artifact?.type === 'video' ? <><video className="max-h-[560px] w-full rounded-xl bg-black" controls src={new NexoClient(agentToken).artifactUrl(message.artifact.id)} /><a className="mt-3 inline-flex h-7 items-center gap-1 rounded-lg border border-border px-2.5 text-xs" href={new NexoClient(agentToken).artifactUrl(message.artifact.id)} download><Download className="size-3.5" /> Baixar vídeo</a></>
+                        : message.artifact?.type === 'audio' ? <audio className="w-full" controls src={new NexoClient(agentToken).artifactUrl(message.artifact.id)} />
+                        : message.kind === 'image' && svg ? <><Image unoptimized width={1024} height={1024} className="aspect-square w-full rounded-xl bg-white object-contain" src={`data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}`} alt="Diagrama SVG criado pelo Nexo" /><div className="mt-3 flex flex-wrap gap-2"><Badge variant="outline">SVG vetorial</Badge><Button size="sm" variant="outline" onClick={() => download(svg, 'diagrama-nexo.svg', 'image/svg+xml')}><Download /> Baixar SVG</Button></div></>
                         : message.kind === 'sheet' ? <><pre className="max-h-64 overflow-auto whitespace-pre-wrap font-mono text-xs">{stripFence(message.content)}</pre><Button className="mt-3" size="sm" variant="outline" onClick={() => download('\ufeff' + stripFence(message.content), 'planilha-nexo.csv', 'text/csv;charset=utf-8')}><Download /> Baixar planilha</Button></>
                         : message.kind === 'task' && parseAgentTask(message.content) ? (() => { const task = parseAgentTask(message.content)!; return <AgentTaskCard task={task} busy={actionLoading} onPermission={(permission, decision) => void decideTaskPermission(index, task, permission, decision)} onControl={action => void controlAgentTask(index, task.id, action)} onRefresh={() => void refreshAgentTask(index, task.id)} />; })()
                         : message.kind === 'action' && parseAction(message.content) ? (() => { const action = parseAction(message.content)!; const readOnly = ['read_file', 'list_files'].includes(action.type); return <div className="min-w-[260px] space-y-3"><div className="flex items-center gap-2 text-primary"><ShieldCheck className="size-4" /><span className="text-xs font-semibold uppercase tracking-wide">{readOnly ? 'Acesso local solicitado' : 'Ação protegida'}</span></div><div><p className="font-medium">{actionTitle(action)}</p><p className="mt-1 break-all font-mono text-xs text-muted-foreground">{action.path}</p><p className="mt-2 text-xs text-muted-foreground">{action.reason}</p></div>{action.content && <pre className="max-h-32 overflow-auto rounded-lg bg-muted p-2 font-mono text-[10px]">{action.content.slice(0, 1800)}</pre>}{action.output && <pre className="max-h-40 overflow-auto whitespace-pre-wrap rounded-lg bg-muted p-2 font-mono text-[10px]">{action.output}</pre>}{action.status === 'pending' ? <Button size="sm" disabled={!agentOnline || !agentToken || actionLoading} onClick={() => void runAction(index, action)}>{action.type === 'write_file' ? <FilePenLine /> : action.type === 'create_folder' ? <FolderPlus /> : action.type === 'create_project' ? <Server /> : <Library />}{agentOnline ? actionLoading ? 'Executando…' : actionButton(action) : 'Agente local offline'}</Button> : <Badge variant={action.status === 'completed' ? 'secondary' : 'destructive'}>{action.result}</Badge>}</div>; })()
@@ -682,10 +717,10 @@ export default function Home() {
                   </NativeSelect>
                 </div>
               </div>
-              {documents.length > 0 && <div className="mb-2 flex flex-wrap gap-1.5">{documents.map((doc, index) => <Badge key={`${doc.name}-${index}`} variant="secondary" className="h-7 gap-1.5 px-2.5"><FileText />{doc.name}<button aria-label={`Remover ${doc.name}`} onClick={() => setDocuments(items => items.filter((_, itemIndex) => itemIndex !== index))}><X className="size-3" /></button></Badge>)}</div>}
+              {(documents.length > 0 || attachments.length > 0) && <div className="mb-2 flex flex-wrap gap-1.5">{documents.map((doc, index) => <Badge key={`${doc.name}-${index}`} variant="secondary" className="h-7 gap-1.5 px-2.5"><FileText />{doc.name}<button aria-label={`Remover ${doc.name}`} onClick={() => setDocuments(items => items.filter((_, itemIndex) => itemIndex !== index))}><X className="size-3" /></button></Badge>)}{attachments.map((item, index) => <Badge key={`${item.name}-${index}`} variant="secondary" className="h-7 gap-1.5 px-2.5">{item.type === 'image' ? <ImageIcon /> : item.type === 'video' ? <Film /> : <Mic />}{item.name}<button aria-label={`Remover ${item.name}`} onClick={() => setAttachments(items => items.filter((_, itemIndex) => itemIndex !== index))}><X className="size-3" /></button></Badge>)}</div>}
               <div className="composer rounded-[20px] border border-border p-2 shadow-[0_18px_55px_rgb(0_0_0/18%)] focus-within:border-primary/30">
-                <Textarea value={prompt} onChange={event => setPrompt(event.target.value)} onKeyDown={event => { if (event.key === 'Enter' && !event.shiftKey) { event.preventDefault(); void askNexo(); } }} placeholder={mode === 'Planilhas' ? 'Descreva a planilha que precisa…' : mode === 'Imagens' ? 'Descreva uma imagem simples…' : mode === 'Programar' ? 'Descreva o código avançado…' : mode === 'Agente' ? 'Descreva a alteração no projeto…' : 'Pode falar do seu jeito…'} className="min-h-14 max-h-32 resize-none border-0 bg-transparent px-2.5 py-2 text-sm shadow-none focus-visible:ring-0" />
-                <div className="flex items-center justify-between gap-2"><div className="flex min-w-0 items-center gap-0.5"><input ref={fileInput} className="hidden" type="file" multiple accept=".txt,.md,.json,.csv,.js,.ts,.tsx,.jsx,.py,.html,.css,.xml,.yaml,.yml,.log" onChange={addDocuments} /><Button size="icon-sm" variant="ghost" aria-label="Anexar arquivo" onClick={() => fileInput.current?.click()}><Paperclip /></Button><Button size="icon-sm" variant={listening ? 'secondary' : 'ghost'} className={listening ? 'text-rose-400' : ''} aria-label="Falar" onClick={startVoice}>{listening ? <MicOff /> : <Mic />}</Button><Button size="icon-sm" variant={voiceOutput ? 'secondary' : 'ghost'} aria-label="Ler respostas em voz alta" onClick={() => { setVoiceOutput(value => !value); speechSynthesis?.cancel(); }}>{voiceOutput ? <Volume2 /> : <VolumeX />}</Button><Button size="sm" variant={webSearch ? 'secondary' : 'ghost'} className={webSearch ? 'text-primary' : 'text-muted-foreground'} onClick={() => setWebSearch(value => !value)}><Search /><span className="hidden sm:inline">{webSearch ? 'Web ligada' : 'Pesquisar'}</span></Button><Button size="icon-sm" variant="ghost" aria-label="Pesquisar no Google" title="Pesquisar no Google em uma nova aba" onClick={openGoogleSearch}><Globe2 /></Button></div><Button size="icon" className="rounded-xl" onClick={() => void askNexo()} disabled={!prompt.trim() || loading} aria-label="Enviar"><ArrowUp /></Button></div>
+                <Textarea value={prompt} onChange={event => setPrompt(event.target.value)} onKeyDown={event => { if (event.key === 'Enter' && !event.shiftKey) { event.preventDefault(); void askNexo(); } }} placeholder={mode === 'Planilhas' ? 'Descreva a planilha que precisa…' : mode === 'Imagens' ? 'Descreva a imagem que quer gerar…' : mode === 'Vídeos' ? 'Descreva um vídeo curto…' : mode === 'Programar' ? 'Descreva o código avançado…' : mode === 'Agente' ? 'Descreva a alteração no projeto…' : 'Pode falar do seu jeito…'} className="min-h-14 max-h-32 resize-none border-0 bg-transparent px-2.5 py-2 text-sm shadow-none focus-visible:ring-0" />
+                <div className="flex items-center justify-between gap-2"><div className="flex min-w-0 items-center gap-0.5"><input ref={fileInput} className="hidden" type="file" multiple accept=".txt,.md,.json,.csv,.js,.ts,.tsx,.jsx,.py,.html,.css,.xml,.yaml,.yml,.log,image/*,audio/*,video/*" onChange={addDocuments} /><Button size="icon-sm" variant="ghost" aria-label="Anexar arquivo" onClick={() => fileInput.current?.click()}><Paperclip /></Button><Button size="icon-sm" variant={listening ? 'secondary' : 'ghost'} className={listening ? 'text-rose-400' : ''} aria-label="Falar" onClick={startVoice}>{listening ? <MicOff /> : <Mic />}</Button><Button size="icon-sm" variant={voiceOutput ? 'secondary' : 'ghost'} aria-label="Ler respostas em voz alta" onClick={() => { setVoiceOutput(value => !value); speechSynthesis?.cancel(); }}>{voiceOutput ? <Volume2 /> : <VolumeX />}</Button><Button size="sm" variant={webSearch ? 'secondary' : 'ghost'} className={webSearch ? 'text-primary' : 'text-muted-foreground'} onClick={() => setWebSearch(value => !value)}><Search /><span className="hidden sm:inline">{webSearch ? 'Web ligada' : 'Pesquisar'}</span></Button><Button size="icon-sm" variant="ghost" aria-label="Pesquisar no Google" title="Pesquisar no Google em uma nova aba" onClick={openGoogleSearch}><Globe2 /></Button></div><Button size="icon" className="rounded-xl" onClick={() => void askNexo()} disabled={!prompt.trim() || loading} aria-label="Enviar"><ArrowUp /></Button></div>
               </div>
               {notice && <p className="mt-2 text-center text-xs text-amber-600 dark:text-amber-300">{notice}</p>}
               <p className="mt-2 text-center text-[10px] text-muted-foreground">O Nexo pode cometer erros. Confirme informações importantes.</p>

@@ -6,14 +6,19 @@ const BASE_IDENTITY = Object.freeze({
   formality: 0.28,
   verbosity: 0.46,
   initiative: 0.62,
+  warmth: 0.58,
+  technicality: 0.56,
 });
 
 const CONTEXT_LIMITS = Object.freeze({
   casual: { profanity: 0.7, sarcasm: 0.6, humor: 0.8, initiative: 0.85 },
   playful: { profanity: 0.75, sarcasm: 0.75, humor: 0.95, initiative: 0.85 },
   coding: { profanity: 0.28, sarcasm: 0.25, humor: 0.45, initiative: 0.72 },
+  technical: { profanity: 0.2, sarcasm: 0.18, humor: 0.3, initiative: 0.72, warmth: 0.7 },
   study: { profanity: 0.12, sarcasm: 0.12, humor: 0.35, initiative: 0.65 },
   serious: { profanity: 0.04, sarcasm: 0.02, humor: 0.08, initiative: 0.5 },
+  sensitive: { profanity: 0, sarcasm: 0, humor: 0.02, initiative: 0.42, warmth: 0.88 },
+  frustrated: { profanity: 0.35, sarcasm: 0.08, humor: 0.12, initiative: 0.82, warmth: 0.78 },
   security: { profanity: 0, sarcasm: 0, humor: 0.05, initiative: 0.35 },
 });
 
@@ -33,6 +38,9 @@ function styleSignals(message) {
   if (/(?:tome|tenha) iniciativa|seja proativ|pode sugerir|traga ideias/.test(text)) add('initiative', 0.82, 0.9, true, 'explicit-initiative');
   if (/(?:s[oó] fa[cç]a|fa[cç]a apenas) o que eu pedir|sem sugest/.test(text)) add('initiative', 0.15, 0.93, true, 'explicit-low-initiative');
   if (/(?:\bkk+k+\b|\bha(?:ha)+\b|😂|🤣)/.test(text)) add('humor', 0.68, 0.22, false, 'implicit-laughter');
+  if (/(?:explique antes do c[oó]digo|quero entender|ensine passo a passo)/.test(text)) add('technicality', 0.72, 0.84, true, 'explicit-explain-first');
+  if (/(?:s[oó] o c[oó]digo|c[oó]digo direto|sem explica[cç][aã]o)/.test(text)) add('technicality', 0.35, 0.9, true, 'explicit-code-first');
+  if (/(?:seja mais acolhedor|fale com cuidado|mais empatia)/.test(text)) add('warmth', 0.84, 0.9, true, 'explicit-warmth');
   if (/\b(?:porra|caralho|merda|foda|cacete)\b/.test(text)) { add('profanity', 0.46, 0.18, false, 'implicit-user-profanity'); add('formality', 0.16, 0.14, false, 'implicit-informal-language'); }
   return signals;
 }
@@ -84,7 +92,9 @@ export function createPersonalityEngine(database) {
       const tags = [tone, length, traits.humor > 0.62 ? 'humor livre' : traits.humor < 0.15 ? 'sem humor' : 'humor leve', traits.profanity > 0.5 ? 'palavrão só se natural' : 'sem palavrão', traits.initiative > 0.68 ? 'proativo' : 'sem sugestões extras'];
       return `Estilo: ${tags.join(', ')}.`;
     }
-    const base = `Tom ${tone}; tamanho ${length}; ${humor}; ${profanity}; ${initiative}. Competência e precisão sempre vencem estilo.`;
+    const warmth = traits.warmth > 0.7 ? 'seja caloroso sem forçar intimidade' : 'cordialidade proporcional';
+    const technicality = traits.technicality > 0.68 ? 'explique fundamentos antes de detalhes de implementação' : traits.technicality < 0.4 ? 'vá direto à implementação' : 'equilibre explicação e execução';
+    const base = `Tom ${tone}; tamanho ${length}; ${humor}; ${profanity}; ${initiative}; ${warmth}; ${technicality}. Competência e precisão sempre vencem estilo.`;
     return `${base} Contexto atual: ${context}. Não repita bordões, não finja emoções humanas e não programe frases prontas; varie a fala de modo coerente com a conversa.`;
   }
 

@@ -1,4 +1,4 @@
-const AGENT_PATTERNS = /\b(?:analise|investigue|corrija|implemente|altere|modifique|edite|crie|rode|execute|teste|publique)\b[\s\S]*\b(?:projeto|repositorio|repositório|arquivo|codigo|código|site|api|servidor|testes?)\b/i;
+const AGENT_PATTERNS = /(?:\b(?:corrija|implemente|altere|modifique|edite|crie|rode|execute|publique)\b[\s\S]*\b(?:projeto|repositorio|repositório|arquivo|codigo|código|site|api|servidor|testes?)\b|\b(?:analise|investigue|teste)\b[\s\S]*\b(?:meu|minha|este|esta|o nosso|a nossa)\s+(?:projeto|repositorio|repositório|arquivo|codigo|código|site|api|servidor|testes?)\b)/i;
 const DEEP_PATTERNS = /\b(?:explique em detalhes|analise|compare|pesquise|investigue|arquitetura|estrategia|estratégia|documento|planilha|programa|codigo|código|api|banco de dados)\b/i;
 const MEMORY_PATTERNS = /\b(?:lembra|lembre|memoria|memória|conversamos|eu disse|eu falei|meu|minha|meus|minhas|prefiro|gosto|costumo)\b/i;
 const DOCUMENT_PATTERNS = /\b(?:arquivo|documento|anexo|pdf|docx|xlsx|csv|texto enviado|planilha)\b/i;
@@ -7,6 +7,8 @@ const SECURITY_PATTERNS = /\b(?:senha|credencial|token|segredo|vulnerabilidade|m
 const CODING_PATTERNS = /\b(?:codigo|código|bug|erro|typescript|javascript|python|react|node|api|função|funcao|classe|build|teste|program)\b/i;
 const STUDY_PATTERNS = /\b(?:estud|prova|faculdade|escola|aprender|matéria|materia|exercício|exercicio|explica)\b/i;
 const PLAYFUL_PATTERNS = /(?:\bkk+k+\b|\bha(?:ha)+\b|\brs+\b|😂|🤣|\bzoa|brincadeira|meme\b)/i;
+const FRUSTRATED_PATTERNS = /\b(?:irritad|frustrad|cansad|de novo|n[aã]o funciona|que saco|puta merda|porra)\b/i;
+const SENSITIVE_PATTERNS = /\b(?:trauma|luto|suic|abuso|viol[eê]ncia|depress|doen[cç]a grave|diagn[oó]stico)\b/i;
 
 export function normalizeIntent(value = '') {
   return String(value).normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().trim().replace(/[?!.,]+$/g, '');
@@ -14,8 +16,10 @@ export function normalizeIntent(value = '') {
 
 export function classifyConversationContext(question = '') {
   if (SECURITY_PATTERNS.test(question)) return 'security';
+  if (SENSITIVE_PATTERNS.test(question)) return 'sensitive';
+  if (FRUSTRATED_PATTERNS.test(question)) return 'frustrated';
   if (SERIOUS_PATTERNS.test(question)) return 'serious';
-  if (CODING_PATTERNS.test(question)) return 'coding';
+  if (CODING_PATTERNS.test(question)) return 'technical';
   if (STUDY_PATTERNS.test(question)) return 'study';
   if (PLAYFUL_PATTERNS.test(question)) return 'playful';
   return 'casual';

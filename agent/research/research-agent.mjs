@@ -87,6 +87,23 @@ export function createResearchAgent({ fetchImpl = fetch, resolveHost = lookup } 
     return { query, sources: selected, results: unique, errors, researchedAt: new Date().toISOString() };
   }
 
+  async function investigate({ question, sources = Object.keys(providers), limitPerQuery = 4 }) {
+    const fragments = String(question).split(/\b(?:versus|vs\.?|e tamb[eé]m|compare com)\b|[;?]+/i).map(value => value.trim()).filter(value => value.length >= 4);
+    const queries = [...new Set([String(question).trim(), ...fragments])].slice(0, 5);
+    const batches = await Promise.all(queries.map(query => search({ query, sources, limit: limitPerQuery })));
+    const evidence = batches.flatMap(batch => batch.results.map(result => ({ query: batch.query, title: result.title, url: result.url, source: result.source, evidence: result.evidence || result.snippet, publishedAt: result.publishedAt })));
+    const unique = evidence.filter((item, index, all) => all.findIndex(candidate => candidate.url === item.url) === index);
+    const sourceCoverage = Object.fromEntries(sources.map(source => [source, unique.filter(item => item.source === source).length]));
+    const gaps = queries.filter(query => !evidence.some(item => item.query === query)).map(query => `Sem resultado para: ${query}`);
+    const dates = unique.map(item => item.publishedAt).filter(Boolean).sort((left, right) => String(left).localeCompare(String(right)));
+    return {
+      question, queries, evidence: unique, sourceCoverage, gaps,
+      divergenceSignals: unique.length > 1 ? ['Compare datas, metodologia e autoridade das fontes antes de sintetizar; resultados recuperados não são automaticamente verdadeiros.'] : ['Pouca diversidade de evidência; trate a conclusão como incerta.'],
+      dateRange: dates.length ? { oldest: dates[0], newest: dates.at(-1) } : null,
+      researchedAt: new Date().toISOString(),
+    };
+  }
+
   const definitions = [
     defineTool({
       name: 'research.search', aliases: ['web.search'], description: 'Pesquisa em fontes públicas e devolve URLs, trechos e evidências normalizadas.', risk: RISK.NETWORK,
@@ -98,9 +115,14 @@ export function createResearchAgent({ fetchImpl = fetch, resolveHost = lookup } 
       inputSchema: { type: 'object', required: ['url'], additionalProperties: false, properties: { url: { type: 'string', minLength: 8, maxLength: 2000 }, maxBytes: { type: 'integer', minimum: 1_000, maximum: 2_000_000, default: 1_000_000 } } },
       execute: async ({ url, maxBytes = 1_000_000 }) => { const page = await request(fetchImpl, url, { maxBytes, resolveHost }); return extractPage(page.text, page.url); },
     }),
+    defineTool({
+      name: 'research.investigate', description: 'Decompõe uma pergunta, pesquisa várias fontes em paralelo e devolve matriz de evidências, cobertura, datas, divergências e lacunas.', risk: RISK.NETWORK,
+      inputSchema: { type: 'object', required: ['question'], additionalProperties: false, properties: { question: { type: 'string', minLength: 4, maxLength: 1000 }, sources: { type: 'array', maxItems: 3, items: { type: 'string', enum: Object.keys(providers) } }, limitPerQuery: { type: 'integer', minimum: 1, maximum: 8, default: 4 } } },
+      execute: investigate,
+    }),
   ];
 
-  return { definitions, search, extractPage, fetchPage: async (url, options = {}) => { const page = await request(fetchImpl, url, { ...options, resolveHost }); return extractPage(page.text, page.url); }, health: () => ({ providers: Object.keys(providers), paidKeysRequired: false }) };
+  return { definitions, search, investigate, extractPage, fetchPage: async (url, options = {}) => { const page = await request(fetchImpl, url, { ...options, resolveHost }); return extractPage(page.text, page.url); }, health: () => ({ providers: Object.keys(providers), paidKeysRequired: false, multiQueryEvidence: true }) };
 }
 
 export { extractPage };

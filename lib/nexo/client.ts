@@ -1,4 +1,4 @@
-import type { AgentHealth, AgentTask, BackgroundJob, Chat, ChatMessage, Effort, LocalDocument, NexoSkill, RuntimeEvent, RuntimeImmediateResponse, RuntimeStreamEvent, UserProfile } from './types';
+import type { AgentHealth, AgentTask, BackgroundJob, Chat, ChatMessage, Effort, LocalAttachment, LocalDocument, MediaArtifact, MediaJob, NexoSkill, RuntimeEvent, RuntimeImmediateResponse, RuntimeStreamEvent, UserProfile } from './types';
 
 export const NEXO_AGENT_URL = 'http://127.0.0.1:7331';
 
@@ -16,7 +16,7 @@ export class NexoClient {
   async createTask(objective: string, options: { maxSteps: number; maxRetries: number }) {
     return (await jsonResponse<{ task: AgentTask }>(await fetch(`${this.baseUrl}/agent/tasks`, { method: 'POST', headers: this.headers(true), body: JSON.stringify({ objective, ...options }) }))).task;
   }
-  async streamChat(input: { question: string; mode: string; effort: Effort; profile: UserProfile; history: ChatMessage[]; documents: LocalDocument[]; weather?: Record<string, unknown> | null; webSearch: boolean }, onEvent: (event: RuntimeStreamEvent) => void, signal?: AbortSignal) {
+  async streamChat(input: { question: string; mode: string; effort: Effort; profile: UserProfile; history: ChatMessage[]; documents: LocalDocument[]; attachments?: LocalAttachment[]; weather?: Record<string, unknown> | null; webSearch: boolean }, onEvent: (event: RuntimeStreamEvent) => void, signal?: AbortSignal) {
     const response = await fetch(`${this.baseUrl}/chat`, { method: 'POST', headers: this.headers(true), body: JSON.stringify(input), signal });
     const contentType = response.headers.get('content-type') || '';
     if (contentType.includes('application/json')) return jsonResponse<RuntimeImmediateResponse>(response);
@@ -59,4 +59,7 @@ export class NexoClient {
   async listMcpServers() { return jsonResponse(await fetch(`${this.baseUrl}/agent/mcp/servers`, { headers: this.headers() })); }
   async resetPersonality() { return jsonResponse(await fetch(`${this.baseUrl}/agent/personality/reset`, { method: 'POST', headers: this.headers(true), body: JSON.stringify({ confirmation: 'RESET' }) })); }
   async warmRuntime(effort: Effort) { return jsonResponse(await fetch(`${this.baseUrl}/agent/runtime/warm`, { method: 'POST', headers: this.headers(true), body: JSON.stringify({ effort }) })); }
+  async getMediaJob(id: string) { return (await jsonResponse<{ job: MediaJob }>(await fetch(`${this.baseUrl}/agent/media/jobs/${id}`, { headers: this.headers() }))).job; }
+  async getArtifact(id: string) { return (await jsonResponse<{ artifacts: MediaArtifact[] }>(await fetch(`${this.baseUrl}/agent/artifacts?limit=100`, { headers: this.headers() }))).artifacts.find(item => item.id === id) || null; }
+  artifactUrl(id: string) { return `${this.baseUrl}/agent/artifacts/${id}/content?token=${encodeURIComponent(this.token)}`; }
 }

@@ -1,6 +1,6 @@
 {
   "name": "nexo-local-ai",
-  "version": "0.2.0",
+  "version": "0.4.0",
   "private": true,
   "engines": {
     "node": ">=22.13.0"
@@ -10,6 +10,9 @@
     "agent": "node local-agent.mjs",
     "test:agent": "node --test agent/tests/*.test.mjs",
     "eval:agent": "node agent/evals/runtime-eval.mjs",
+    "eval:intelligence": "node agent/evals/intelligence-v4-eval.mjs",
+    "eval:media": "node agent/evals/media-v4-eval.mjs",
+    "benchmark:v4": "node agent/evals/performance-v4.mjs",
     "build": "vinext build",
     "start": "wrangler dev --config dist/server/wrangler.json",
     "lint": "oxlint",

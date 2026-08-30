@@ -103,6 +103,28 @@ export function createDatabase(dataDir) {
       confidence REAL NOT NULL, explicit INTEGER NOT NULL DEFAULT 0,
       context TEXT NOT NULL, signal TEXT NOT NULL, created_at TEXT NOT NULL
     )`,
+    `CREATE TABLE IF NOT EXISTS model_benchmarks (
+      model TEXT NOT NULL, domain TEXT NOT NULL, score REAL NOT NULL,
+      sample_count INTEGER NOT NULL DEFAULT 0, median_latency_ms REAL,
+      metadata_json TEXT, updated_at TEXT NOT NULL,
+      PRIMARY KEY(model, domain)
+    )`,
+    `CREATE TABLE IF NOT EXISTS artifacts (
+      id TEXT PRIMARY KEY, type TEXT NOT NULL, mime_type TEXT NOT NULL, provider TEXT NOT NULL,
+      model TEXT, location TEXT NOT NULL, metadata_json TEXT NOT NULL DEFAULT '{}', source_task TEXT,
+      created_at TEXT NOT NULL
+    )`,
+    `CREATE TABLE IF NOT EXISTS media_jobs (
+      id TEXT PRIMARY KEY, kind TEXT NOT NULL, status TEXT NOT NULL, priority INTEGER NOT NULL,
+      input_json TEXT NOT NULL, artifact_id TEXT, error TEXT, created_at TEXT NOT NULL,
+      started_at TEXT, completed_at TEXT, cancelled_at TEXT
+    )`,
+    `CREATE TABLE IF NOT EXISTS performance_samples (
+      id TEXT PRIMARY KEY, route TEXT NOT NULL, cold INTEGER NOT NULL DEFAULT 0,
+      runtime_overhead_ms REAL, ttft_ms REAL, total_ms REAL, prompt_tokens INTEGER,
+      completion_tokens INTEGER, ram_mb REAL, vram_mb REAL, tool_calls INTEGER NOT NULL DEFAULT 0,
+      model_calls INTEGER NOT NULL DEFAULT 0, metadata_json TEXT, created_at TEXT NOT NULL
+    )`,
     `CREATE VIRTUAL TABLE IF NOT EXISTS memories_fts USING fts5(
       id UNINDEXED, kind UNINDEXED, content, tokenize='unicode61 remove_diacritics 2'
     )`,
@@ -127,10 +149,19 @@ export function createDatabase(dataDir) {
   if (!memoryColumns.has('confidence')) db.prepare('ALTER TABLE memories ADD COLUMN confidence REAL NOT NULL DEFAULT 0.7').run();
   if (!memoryColumns.has('source')) db.prepare("ALTER TABLE memories ADD COLUMN source TEXT NOT NULL DEFAULT 'agent'").run();
   if (!memoryColumns.has('last_confirmed_at')) db.prepare('ALTER TABLE memories ADD COLUMN last_confirmed_at TEXT').run();
+  if (!memoryColumns.has('vector_model')) db.prepare("ALTER TABLE memories ADD COLUMN vector_model TEXT NOT NULL DEFAULT 'lexical-hash-v1'").run();
+  if (!memoryColumns.has('access_count')) db.prepare('ALTER TABLE memories ADD COLUMN access_count INTEGER NOT NULL DEFAULT 0').run();
+  if (!memoryColumns.has('forgotten_at')) db.prepare('ALTER TABLE memories ADD COLUMN forgotten_at TEXT').run();
+  if (!memoryColumns.has('reinforcement_count')) db.prepare('ALTER TABLE memories ADD COLUMN reinforcement_count INTEGER NOT NULL DEFAULT 0').run();
+  if (!memoryColumns.has('contradiction_count')) db.prepare('ALTER TABLE memories ADD COLUMN contradiction_count INTEGER NOT NULL DEFAULT 0').run();
+  const documentColumns = new Set(db.prepare('PRAGMA table_info(document_chunks)').all().map(column => column.name));
+  if (!documentColumns.has('vector_model')) db.prepare("ALTER TABLE document_chunks ADD COLUMN vector_model TEXT NOT NULL DEFAULT 'lexical-hash-v1'").run();
   const taskColumns = new Set(db.prepare('PRAGMA table_info(tasks)').all().map(column => column.name));
   if (!taskColumns.has('parent_task_id')) db.prepare('ALTER TABLE tasks ADD COLUMN parent_task_id TEXT').run();
   if (!taskColumns.has('assigned_agent')) db.prepare("ALTER TABLE tasks ADD COLUMN assigned_agent TEXT NOT NULL DEFAULT 'general'").run();
   db.prepare('CREATE INDEX IF NOT EXISTS idx_tasks_parent_updated ON tasks(parent_task_id, updated_at)').run();
+  const toolRunColumns = new Set(db.prepare('PRAGMA table_info(tool_runs)').all().map(column => column.name));
+  if (!toolRunColumns.has('error_kind')) db.prepare('ALTER TABLE tool_runs ADD COLUMN error_kind TEXT').run();
   db.prepare('INSERT INTO memories_fts (id, kind, content) SELECT m.id, m.kind, m.content FROM memories m WHERE NOT EXISTS (SELECT 1 FROM memories_fts f WHERE f.id = m.id)').run();
   db.prepare('INSERT INTO document_chunks_fts (id, source, content) SELECT d.id, d.source, d.content FROM document_chunks d WHERE NOT EXISTS (SELECT 1 FROM document_chunks_fts f WHERE f.id = d.id)').run();
   db.exec('PRAGMA optimize');
@@ -183,15 +214,15 @@ export function createDatabase(dataDir) {
   }
   function addToolRun(run) {
     const id = randomUUID(); const createdAt = new Date().toISOString();
-    db.prepare('INSERT INTO tool_runs (id, task_id, step_index, tool, input_json, output_json, status, attempt, duration_ms, error, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)')
-      .run(id, run.taskId, run.stepIndex, run.tool, JSON.stringify(run.input || {}), run.output == null ? null : JSON.stringify(run.output), run.status, run.attempt, run.durationMs ?? null, run.error || null, createdAt);
+    db.prepare('INSERT INTO tool_runs (id, task_id, step_index, tool, input_json, output_json, status, attempt, duration_ms, error, error_kind, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)')
+      .run(id, run.taskId, run.stepIndex, run.tool, JSON.stringify(run.input || {}), run.output == null ? null : JSON.stringify(run.output), run.status, run.attempt, run.durationMs ?? null, run.error || null, run.errorKind || null, createdAt);
     return { id, ...run, createdAt };
   }
   function getToolRuns(taskId) {
     return db.prepare('SELECT * FROM tool_runs WHERE task_id = ? ORDER BY created_at ASC').all(taskId).map(row => ({
       id: row.id, taskId: row.task_id, stepIndex: row.step_index, tool: row.tool,
       input: json(row.input_json, {}), output: json(row.output_json), status: row.status,
-      attempt: row.attempt, durationMs: row.duration_ms, error: row.error, createdAt: row.created_at,
+      attempt: row.attempt, durationMs: row.duration_ms, error: row.error, errorKind: row.error_kind, createdAt: row.created_at,
     }));
   }
   function createPermission(permission) {
@@ -212,13 +243,22 @@ export function createDatabase(dataDir) {
   function getPermissions(taskId) { return db.prepare('SELECT id FROM permissions WHERE task_id = ? ORDER BY created_at ASC').all(taskId).map(row => getPermission(row.id)); }
   function putMemory(memory) {
     const id = randomUUID(); const now = new Date().toISOString();
-    db.prepare('INSERT INTO memories (id, kind, content, vector_json, metadata_json, importance, confidence, source, created_at, last_accessed_at, last_confirmed_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)')
-      .run(id, memory.kind, memory.content, JSON.stringify(memory.vector), JSON.stringify(memory.metadata || {}), memory.importance ?? 0.5, memory.confidence ?? 0.7, memory.source || 'agent', now, now, memory.lastConfirmedAt || null);
+    db.prepare('INSERT INTO memories (id, kind, content, vector_json, vector_model, metadata_json, importance, confidence, source, created_at, last_accessed_at, last_confirmed_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)')
+      .run(id, memory.kind, memory.content, JSON.stringify(memory.vector), memory.vectorModel || 'lexical-hash-v1', JSON.stringify(memory.metadata || {}), memory.importance ?? 0.5, memory.confidence ?? 0.7, memory.source || 'agent', now, now, memory.lastConfirmedAt || null);
     db.prepare('INSERT INTO memories_fts (id, kind, content) VALUES (?, ?, ?)').run(id, memory.kind, memory.content);
     return id;
   }
-  function listMemories(limit = 500) { return db.prepare('SELECT * FROM memories ORDER BY importance DESC, last_accessed_at DESC LIMIT ?').all(limit).map(row => ({ id: row.id, kind: row.kind, content: row.content, vector: json(row.vector_json, []), metadata: json(row.metadata_json, {}), importance: row.importance, confidence: row.confidence, source: row.source, createdAt: row.created_at, lastAccessedAt: row.last_accessed_at, lastConfirmedAt: row.last_confirmed_at })); }
-  function touchMemory(id) { db.prepare('UPDATE memories SET last_accessed_at = ? WHERE id = ?').run(new Date().toISOString(), id); }
+  function listMemories(limit = 500) { return db.prepare('SELECT * FROM memories WHERE forgotten_at IS NULL ORDER BY importance DESC, last_accessed_at DESC LIMIT ?').all(limit).map(row => ({ id: row.id, kind: row.kind, content: row.content, vector: json(row.vector_json, []), vectorModel: row.vector_model, metadata: json(row.metadata_json, {}), importance: row.importance, confidence: row.confidence, source: row.source, accessCount: row.access_count, reinforcementCount: row.reinforcement_count, contradictionCount: row.contradiction_count, createdAt: row.created_at, lastAccessedAt: row.last_accessed_at, lastConfirmedAt: row.last_confirmed_at, forgottenAt: row.forgotten_at })); }
+  function touchMemory(id) { db.prepare('UPDATE memories SET last_accessed_at = ?, access_count = access_count + 1 WHERE id = ?').run(new Date().toISOString(), id); }
+  function updateMemoryVector(id, vector, vectorModel) { db.prepare('UPDATE memories SET vector_json = ?, vector_model = ? WHERE id = ?').run(JSON.stringify(vector), vectorModel, id); }
+  function reinforceMemory(id, { importance = 0.5, confidence = 0.7, confirmedAt = null } = {}) {
+    db.prepare('UPDATE memories SET reinforcement_count = reinforcement_count + 1, importance = MIN(1, MAX(importance, ?)), confidence = MIN(0.99, MAX(confidence, ?)), last_confirmed_at = COALESCE(?, last_confirmed_at), last_accessed_at = ? WHERE id = ?').run(importance, confidence, confirmedAt, new Date().toISOString(), id);
+    return listMemories(2000).find(item => item.id === id) || null;
+  }
+  function contradictMemory(id) { db.prepare('UPDATE memories SET contradiction_count = contradiction_count + 1, confidence = MAX(0.1, confidence - 0.18) WHERE id = ?').run(id); }
+  function forgetMemories(cutoffIso, maxImportance = 0.25, maxConfidence = 0.45) {
+    return Number(db.prepare('UPDATE memories SET forgotten_at = ? WHERE forgotten_at IS NULL AND created_at < ? AND importance <= ? AND confidence <= ? AND last_confirmed_at IS NULL').run(new Date().toISOString(), cutoffIso, maxImportance, maxConfidence).changes);
+  }
   function searchMemoriesText(query, limit = 50) {
     const match = ftsQuery(query); if (!match) return [];
     return db.prepare('SELECT id, bm25(memories_fts) AS rank FROM memories_fts WHERE memories_fts MATCH ? ORDER BY rank LIMIT ?').all(match, limit).map(row => ({ id: row.id, rank: row.rank }));
@@ -226,12 +266,13 @@ export function createDatabase(dataDir) {
   function replaceDocumentChunks(source, chunks) {
     db.prepare('DELETE FROM document_chunks_fts WHERE source = ?').run(source);
     db.prepare('DELETE FROM document_chunks WHERE source = ?').run(source);
-    const insert = db.prepare('INSERT INTO document_chunks (id, source, chunk_index, content, vector_json, metadata_json, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)');
+    const insert = db.prepare('INSERT INTO document_chunks (id, source, chunk_index, content, vector_json, vector_model, metadata_json, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)');
     const now = new Date().toISOString();
     const insertFts = db.prepare('INSERT INTO document_chunks_fts (id, source, content) VALUES (?, ?, ?)');
-    for (const chunk of chunks) { const id = randomUUID(); insert.run(id, source, chunk.index, chunk.content, JSON.stringify(chunk.vector), JSON.stringify(chunk.metadata || {}), now, now); insertFts.run(id, source, chunk.content); }
+    for (const chunk of chunks) { const id = randomUUID(); insert.run(id, source, chunk.index, chunk.content, JSON.stringify(chunk.vector), chunk.vectorModel || 'lexical-hash-v1', JSON.stringify(chunk.metadata || {}), now, now); insertFts.run(id, source, chunk.content); }
   }
-  function listDocumentChunks(limit = 2000) { return db.prepare('SELECT * FROM document_chunks ORDER BY source, chunk_index LIMIT ?').all(limit).map(row => ({ id: row.id, source: row.source, index: row.chunk_index, content: row.content, vector: json(row.vector_json, []), metadata: json(row.metadata_json, {}) })); }
+  function listDocumentChunks(limit = 2000) { return db.prepare('SELECT * FROM document_chunks ORDER BY source, chunk_index LIMIT ?').all(limit).map(row => ({ id: row.id, source: row.source, index: row.chunk_index, content: row.content, vector: json(row.vector_json, []), vectorModel: row.vector_model, metadata: json(row.metadata_json, {}) })); }
+  function updateDocumentChunkVector(id, vector, vectorModel) { db.prepare('UPDATE document_chunks SET vector_json = ?, vector_model = ?, updated_at = ? WHERE id = ?').run(JSON.stringify(vector), vectorModel, new Date().toISOString(), id); }
   function searchDocumentChunksText(query, limit = 80) {
     const match = ftsQuery(query); if (!match) return [];
     return db.prepare('SELECT id, bm25(document_chunks_fts) AS rank FROM document_chunks_fts WHERE document_chunks_fts MATCH ? ORDER BY rank LIMIT ?').all(match, limit).map(row => ({ id: row.id, rank: row.rank }));
@@ -398,13 +439,57 @@ export function createDatabase(dataDir) {
     return { reset: true, at: new Date().toISOString() };
   }
 
+  function upsertModelBenchmark({ model, domain, score, sampleCount = 0, medianLatencyMs = null, metadata = {} }) {
+    const updatedAt = new Date().toISOString();
+    db.prepare(`INSERT INTO model_benchmarks (model, domain, score, sample_count, median_latency_ms, metadata_json, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?)
+      ON CONFLICT(model, domain) DO UPDATE SET score=excluded.score, sample_count=excluded.sample_count,
+      median_latency_ms=excluded.median_latency_ms, metadata_json=excluded.metadata_json, updated_at=excluded.updated_at`)
+      .run(model, domain, score, sampleCount, medianLatencyMs, JSON.stringify(metadata), updatedAt);
+    return listModelBenchmarks(domain).find(item => item.model === model) || null;
+  }
+  function listModelBenchmarks(domain = null) {
+    const rows = domain
+      ? db.prepare('SELECT * FROM model_benchmarks WHERE domain = ? ORDER BY score DESC').all(domain)
+      : db.prepare('SELECT * FROM model_benchmarks ORDER BY domain, score DESC').all();
+    return rows.map(row => ({ model: row.model, domain: row.domain, score: row.score, sampleCount: row.sample_count, medianLatencyMs: row.median_latency_ms, metadata: json(row.metadata_json, {}), updatedAt: row.updated_at }));
+  }
+
+  function putArtifact({ id = randomUUID(), type, mimeType, provider, model = null, location, metadata = {}, sourceTask = null }) {
+    const createdAt = new Date().toISOString();
+    db.prepare('INSERT INTO artifacts (id, type, mime_type, provider, model, location, metadata_json, source_task, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)')
+      .run(id, type, mimeType, provider, model, location, JSON.stringify(metadata), sourceTask, createdAt);
+    return getArtifact(id);
+  }
+  function getArtifact(id) { const row = db.prepare('SELECT * FROM artifacts WHERE id = ?').get(id); return row ? { id: row.id, type: row.type, mimeType: row.mime_type, provider: row.provider, model: row.model, location: row.location, metadata: json(row.metadata_json, {}), sourceTask: row.source_task, createdAt: row.created_at } : null; }
+  function listArtifacts(limit = 100) { return db.prepare('SELECT id FROM artifacts ORDER BY created_at DESC LIMIT ?').all(Math.max(1, Math.min(Number(limit) || 100, 500))).map(row => getArtifact(row.id)); }
+  function createMediaJob({ kind, priority = 5, input = {} }) {
+    const record = { id: randomUUID(), kind, status: 'queued', priority, input, createdAt: new Date().toISOString() };
+    db.prepare('INSERT INTO media_jobs (id, kind, status, priority, input_json, created_at) VALUES (?, ?, ?, ?, ?, ?)').run(record.id, kind, record.status, priority, JSON.stringify(input), record.createdAt); return getMediaJob(record.id);
+  }
+  function getMediaJob(id) { const row = db.prepare('SELECT * FROM media_jobs WHERE id = ?').get(id); return row ? { id: row.id, kind: row.kind, status: row.status, priority: row.priority, input: json(row.input_json, {}), artifactId: row.artifact_id, error: row.error, createdAt: row.created_at, startedAt: row.started_at, completedAt: row.completed_at, cancelledAt: row.cancelled_at } : null; }
+  function updateMediaJob(id, patch = {}) {
+    const current = getMediaJob(id); if (!current) throw new Error('Job de mídia não encontrado.'); const next = { ...current, ...patch };
+    db.prepare('UPDATE media_jobs SET status=?, artifact_id=?, error=?, started_at=?, completed_at=?, cancelled_at=? WHERE id=?').run(next.status, next.artifactId || null, next.error || null, next.startedAt || null, next.completedAt || null, next.cancelledAt || null, id); return getMediaJob(id);
+  }
+  function listMediaJobs(limit = 100) { return db.prepare('SELECT id FROM media_jobs ORDER BY priority ASC, created_at DESC LIMIT ?').all(Math.max(1, Math.min(Number(limit) || 100, 500))).map(row => getMediaJob(row.id)); }
+  function addPerformanceSample(sample) {
+    const id = randomUUID(); const createdAt = new Date().toISOString();
+    db.prepare('INSERT INTO performance_samples (id, route, cold, runtime_overhead_ms, ttft_ms, total_ms, prompt_tokens, completion_tokens, ram_mb, vram_mb, tool_calls, model_calls, metadata_json, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)')
+      .run(id, sample.route, sample.cold ? 1 : 0, sample.runtimeOverheadMs ?? null, sample.ttftMs ?? null, sample.totalMs ?? null, sample.promptTokens ?? null, sample.completionTokens ?? null, sample.ramMB ?? null, sample.vramMB ?? null, sample.toolCalls || 0, sample.modelCalls || 0, JSON.stringify(sample.metadata || {}), createdAt);
+    return { id, ...sample, createdAt };
+  }
+  function listPerformanceSamples(limit = 500) { return db.prepare('SELECT * FROM performance_samples ORDER BY created_at DESC LIMIT ?').all(Math.max(1, Math.min(Number(limit) || 500, 5000))).map(row => ({ id: row.id, route: row.route, cold: Boolean(row.cold), runtimeOverheadMs: row.runtime_overhead_ms, ttftMs: row.ttft_ms, totalMs: row.total_ms, promptTokens: row.prompt_tokens, completionTokens: row.completion_tokens, ramMB: row.ram_mb, vramMB: row.vram_mb, toolCalls: row.tool_calls, modelCalls: row.model_calls, metadata: json(row.metadata_json, {}), createdAt: row.created_at })); }
+
   return {
     db, createTask, getTask, listTasks, listChildTasks, updateTask, addEvent, getEvents, addToolRun, getToolRuns,
-    createPermission, resolvePermission, getPermission, getPermissions, putMemory, listMemories, touchMemory, searchMemoriesText,
-    replaceDocumentChunks, listDocumentChunks, searchDocumentChunksText, putSession, getSession, replaceTaskGraph, getTaskGraph,
+    createPermission, resolvePermission, getPermission, getPermissions, putMemory, listMemories, touchMemory, updateMemoryVector, reinforceMemory, contradictMemory, forgetMemories, searchMemoriesText,
+    replaceDocumentChunks, listDocumentChunks, updateDocumentChunkVector, searchDocumentChunksText, putSession, getSession, replaceTaskGraph, getTaskGraph,
     putCheckpoint, listCheckpoints, pruneCheckpoints, putRepositoryMap, getRepositoryMap, listInterruptedTasks,
     addRuntimeEvent, listRuntimeEvents, createBackgroundJob, getBackgroundJob, listBackgroundJobs, listDueBackgroundJobs, updateBackgroundJob,
     setSkillEnabled, getSkillStates, putBrowserSession, getBrowserSession, listBrowserSessions,
     listPersonalityTraits, upsertPersonalityTrait, addPersonalityObservation, listPersonalityObservations, resetPersonality,
+    upsertModelBenchmark, listModelBenchmarks,
+    putArtifact, getArtifact, listArtifacts, createMediaJob, getMediaJob, updateMediaJob, listMediaJobs, addPerformanceSample, listPerformanceSamples,
   };
 }

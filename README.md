@@ -1,6 +1,6 @@
 # Nexo Local AI
 
-Runtime local-first para agentes pessoais, com interface web, memória persistente e modelos executados pelo Ollama. O Nexo oferece chat, programação, documentos, planilhas CSV, imagens vetoriais simples, voz, pesquisa com fontes, navegação segura e tarefas autônomas com ferramentas protegidas.
+Runtime local-first para agentes pessoais, com interface web, memória persistente e modelos executados pelo Ollama. O Nexo oferece chat, programação, documentos, planilhas CSV, visão real, arquitetura de mídia com artefatos persistentes, voz pelo navegador, pesquisa com fontes, navegação segura e tarefas autônomas com ferramentas protegidas.
 
 ## Arquitetura do agente
 
@@ -9,12 +9,14 @@ O `Nexo Core` fica em `agent/`, separado da interface:
 - `core/`: fachada do runtime, Task Graph persistente e checkpoints.
 - `runtime/`: roteamento `INSTANT`/`FAST`/`DEEP`/`AGENT`, streaming, cache e carregamento progressivo de contexto.
 - `personality/`: identidade-base, adaptação gradual por confiança/contradição e limites por contexto.
-- `orchestrator/`: Agent Loop, planejamento, execução, verifier, retries e replanejamento.
+- `orchestrator/`: Agent Loop, planejamento, execução, verifier, Critic, autocorreção com orçamento, retries e replanejamento.
 - `tools/`: contratos JSON validados, filesystem, patch com hash, Git, projetos e shell restrito.
 - `safety/`: permissões por risco, limites e executor de processos sem shell com allowlist. Ele reduz a superfície de ataque, mas não substitui isolamento de SO por contêiner ou VM.
-- `memory/`: SQLite, FTS, memória working/episódica/semântica/procedural/user e recuperação vetorial local.
-- `context/`: Context Engine com orçamento, RAG, proteção contra prompt injection, mapa de repositório e busca de símbolos.
-- `models/`: cliente Ollama e roteamento entre os modelos 3B e 7B.
+- `memory/`: SQLite, FTS, embeddings semânticos reais pelo `embeddinggemma`, reranking, importância, confiança, acesso e esquecimento controlado.
+- `context/`: Context Engine V2 seletivo com orçamento, RAG semântico, proteção contra prompt injection, mapa de repositório e busca de símbolos.
+- `models/`: cliente Ollama e Model Router V2 por domínio, dificuldade, necessidade de tools e benchmarks do hardware local.
+- `multimodal/`, `vision/`, `image/`, `audio/` e `video/`: schema comum, visão local pelo Ollama, providers de mídia substituíveis e fallbacks explícitos.
+- `artifacts/`, `media/` e `resources/`: arquivos persistentes, fila cancelável e orçamento observado de CPU/RAM/VRAM.
 - `observability/`: eventos persistentes, métricas e tracing em JSONL.
 - `research/` e `browser/`: busca multi-fonte, leitura HTTP com bloqueio de SSRF, sessões, screenshots e verificação estrutural.
 - `skills/` e `specialists/`: instruções locais recuperadas por intenção e perfis de programação, pesquisa, navegador, documentos e dados.
@@ -25,9 +27,9 @@ A interface usa `lib/nexo` como SDK e `hooks/use-nexo-task-sync.ts` para acompan
 
 No modo **Agente**, o Nexo devolve o controle da interface imediatamente, cria um Task Graph em segundo plano, executa nós independentes em paralelo, pausa antes de escrita ou terminal, retoma após aprovação e valida o resultado antes de concluir. A interface acompanha o progresso sem precisar recarregar. Cada tarefa possui limites, retries, grafo, eventos e checkpoints recuperáveis após reinício.
 
-Perguntas determinísticas não acionam modelo. Conversa simples usa o 3B com prompt mínimo; memória, RAG e pesquisa só entram quando a intenção exige. Planejamento e trabalho profundo usam o 7B. O verificador confronta objetivo, critérios e evidências e termina em `PASS`, `FAIL` ou `UNCERTAIN`; uma alteração de arquivo sem teste, lint, typecheck ou build bem-sucedido nunca recebe `PASS`.
+Perguntas determinísticas não acionam modelo. Conversa simples usa o 3B com prompt mínimo; memória, RAG e pesquisa só entram quando a intenção exige. O Router escolhe automaticamente entre chat, código, raciocínio, pesquisa, documentos, dados e visão, respeitando uma seleção explícita de esforço alto. O verificador confronta objetivo, critérios e evidências e termina em `PASS`, `FAIL` ou `UNCERTAIN`; `FAIL` e `UNCERTAIN` acionam o Critic e até três estratégias diferentes antes da conclusão.
 
-O Core 3.0 registra 34 tools. Pesquisa usa Wikipedia, OpenAlex e Stack Overflow sem exigir chave paga; toda chamada externa continua dependendo de aprovação. O Browser Agent mantém sessões persistentes, bloqueia protocolos e redes privadas indevidas e pode usar Chrome ou Edge headless para gerar screenshots no workspace. O verificador visual atual confirma integridade, peso e dimensões; interpretação semântica da imagem exigirá um modelo local com visão.
+O Core 4.2 registra 36 tools. A inteligência de código usa AST TypeScript/JavaScript, declarações, chamadas e referências; a pesquisa pode decompor perguntas e construir uma matriz multi-fonte de evidências, cobertura, datas e lacunas. Wikipedia, OpenAlex e Stack Overflow não exigem chave paga; toda chamada externa continua dependendo de aprovação. O modelo `qwen2.5vl:3b` interpreta imagens localmente. Geração raster usa Stable Diffusion WebUI/Forge quando esse provider estiver instalado e ativo; se não estiver, a UI informa a indisponibilidade e não fabrica um SVG como resultado.
 
 Quando o trabalho realmente pode ser dividido, `agents.delegate` cria de duas a quatro subtarefas vinculadas à tarefa principal. Elas são executadas em paralelo pelo runtime e cada especialista mantém seus próprios passos, limites, eventos, checkpoints e pedidos de permissão.
 
@@ -43,6 +45,8 @@ Veja a arquitetura, garantias e sequência de evolução em [`docs/NEXO-CORE.md`
 ```powershell
 ollama pull qwen2.5-coder:3b
 ollama pull qwen2.5-coder:7b-instruct-q3_K_S
+ollama pull embeddinggemma
+ollama pull qwen2.5vl:3b
 ```
 
 ## Executar
@@ -62,7 +66,12 @@ Validação do runtime:
 ```powershell
 npm run test:agent
 npm run eval:agent
+npm run eval:intelligence
+npm run eval:media
+npm run benchmark:v4
 ```
+
+`eval:intelligence` contém 200 casos de prontidão estrutural em programação, raciocínio, instruções, memória, pesquisa, tools, recuperação de erro, segurança, conversa e tarefas longas. `eval:media` usa `SKIPPED` para providers realmente ausentes. `benchmark:v4` separa runtime, TTFT, total, cold/warm e modelo. O Router só usa um benchmark de qualidade persistido quando há pelo menos 10 amostras reais naquele domínio.
 
 ## Skills e MCP
 

@@ -52,6 +52,7 @@ test('Repository Intelligence encontra símbolos, referências e Git', async () 
     await writeFile(join(directory, 'src', 'user.ts'), "export function createUser(name: string) { return { name }; }\nexport const current = createUser('Nexo');\n", 'utf8');
     const repository = createRepositoryIntelligence({ workspace: directory, database }); const map = await repository.build('.');
     assert.equal(map.manifest.name, 'sample'); assert.equal((await repository.findSymbol('createUser')).length, 1); assert.equal((await repository.findReferences('createUser')).length, 2);
+    const symbol = await repository.symbolContext('createUser'); assert.equal(symbol.engine, 'TypeScript AST + textual references'); assert.equal(symbol.callers.length, 1);
     const initialized = spawnSync('git', ['init'], { cwd: directory, windowsHide: true }); assert.equal(initialized.status, 0);
     const sandbox = createSandbox({ workspace: directory }); const registry = createToolRegistry(createGitTools(sandbox));
     const status = await registry.execute('git.status', {}); assert.equal(status.exitCode, 0); assert.match(status.stdout, /No commits yet|main|master/);
@@ -70,12 +71,15 @@ test('executor local bloqueia escapes de caminho e processadores externos', asyn
 
 test('Nexo Core expõe runtime completo e remove segredos do contexto', async () => {
   const directory = await mkdtemp(join(tmpdir(), 'nexo-core-')); const dataDir = join(directory, 'data');
-  const core = createNexoCore({ projectRoot: directory, workspace: directory, dataDir, autoResume: false });
+  const fetchImpl = async url => String(url).endsWith('/api/embed')
+    ? { ok: true, json: async () => ({ embeddings: [Array.from({ length: 24 }, (_, index) => index / 24)] }) }
+    : { ok: true, json: async () => ({ models: [] }) };
+  const core = createNexoCore({ projectRoot: directory, workspace: directory, dataDir, autoResume: false, fetchImpl });
   try {
     const health = core.health(); assert.equal(health.runtime, 'Nexo Core'); assert.equal(health.taskGraph, true); assert.equal(health.checkpoints, true);
     assert.ok(health.tools.some(tool => tool.name === 'filesystem.patch')); assert.ok(health.tools.some(tool => tool.name === 'repository.map')); assert.ok(health.tools.some(tool => tool.name === 'git.status'));
-    core.memory.remember('Bruno prefere o tema violeta escuro.', { kind: 'user', confidence: 0.95, source: 'test' });
-    assert.match(core.memory.search('preferência violeta', { limit: 1 })[0].content, /violeta/);
+    await core.memory.remember('Bruno prefere o tema violeta escuro.', { kind: 'user', confidence: 0.95, source: 'test' });
+    assert.match((await core.memory.search('preferência violeta', { limit: 1 }))[0].content, /violeta/);
     assert.equal(redactSecrets('token=abcdefghijklmnop'), '[SEGREDO REMOVIDO]');
     assert.equal(permissionPolicy({ name: 'filesystem.read', risk: 'read' }, { path: '.ssh/id_rsa' }).decision, 'deny');
     assert.equal(permissionPolicy({ name: 'shell.run', risk: 'execute' }, { command: 'git', args: ['reset', '--hard'] }).decision, 'deny');
