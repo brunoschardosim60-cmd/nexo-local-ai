@@ -16,9 +16,13 @@ export function permissionPolicy(tool, input = {}) {
   return { decision: DECISION.ASK, required: true, risk, scope, reason: `A ferramenta ${tool.name} acessará um recurso externo.` };
 }
 
-export function validateTaskLimits({ maxSteps, maxRetries }, defaults) {
+export function validateTaskLimits({ maxSteps, maxRetries, maxToolCalls, maxModelCalls, maxDurationMs, maxCost }, defaults) {
   return {
     maxSteps: Math.max(1, Math.min(Number(maxSteps) || defaults.maxSteps, defaults.maxSteps)),
     maxRetries: Math.max(0, Math.min(Number(maxRetries) || defaults.maxRetries, defaults.maxRetries)),
+    maxToolCalls: Math.max(1, Math.min(Number(maxToolCalls) || defaults.maxToolCalls || defaults.maxSteps * (defaults.maxRetries + 1), defaults.maxToolCalls || 100)),
+    maxModelCalls: Math.max(1, Math.min(Number(maxModelCalls) || defaults.maxModelCalls || defaults.maxSteps * 2, defaults.maxModelCalls || 100)),
+    maxDurationMs: Math.max(10_000, Math.min(Number(maxDurationMs) || defaults.maxTaskMinutes * 60_000, defaults.maxTaskMinutes * 60_000)),
+    maxCost: Math.max(0, Math.min(Number(maxCost) || defaults.maxCost || 0, defaults.maxCost || 0)),
   };
 }

@@ -2,7 +2,7 @@ import { spawn } from 'node:child_process';
 import { resolve, sep } from 'node:path';
 
 const ALLOWED = {
-  git: new Set(['status', 'diff', 'log', 'show']),
+  git: new Set(['status', 'diff', 'log', 'show', 'branch', 'blame', 'add', 'switch', 'commit']),
   npm: new Set(['test', 'run']),
   npx: new Set(['tsc', 'oxlint']),
   node: new Set(['--check']),
@@ -36,7 +36,7 @@ function validateCommand(command, args) {
 
 export function createSandbox({ workspace, timeoutMs = 120_000, maxOutput = 24_000 }) {
   return {
-    async run({ command, args = [], cwd = '.', timeout = timeoutMs }) {
+    async run({ command, args = [], cwd = '.', timeout = timeoutMs }, context = {}) {
       const base = validateCommand(command, args);
       const executable = process.platform === 'win32' && ['npm', 'npx'].includes(base) ? `${base}.cmd` : base;
       const workingDirectory = safeCwd(workspace, cwd);
@@ -48,12 +48,14 @@ export function createSandbox({ workspace, timeoutMs = 120_000, maxOutput = 24_0
       return new Promise((resolvePromise, reject) => {
         const startedAt = performance.now(); let stdout = ''; let stderr = ''; let timedOut = false;
         const child = spawn(executable, args.map(String), { cwd: workingDirectory, env: safeEnv, shell: false, windowsHide: true });
+        const abort = () => child.kill('SIGTERM');
+        if (context.signal?.aborted) abort(); else context.signal?.addEventListener('abort', abort, { once: true });
         const timer = setTimeout(() => { timedOut = true; child.kill('SIGTERM'); }, Math.min(timeout, timeoutMs));
         child.stdout.on('data', chunk => { stdout = `${stdout}${chunk}`.slice(-maxOutput); });
         child.stderr.on('data', chunk => { stderr = `${stderr}${chunk}`.slice(-maxOutput); });
         child.on('error', error => { clearTimeout(timer); reject(error); });
         child.on('close', code => {
-          clearTimeout(timer);
+          clearTimeout(timer); context.signal?.removeEventListener('abort', abort);
           resolvePromise({ command: `${base} ${args.join(' ')}`.trim(), cwd, exitCode: code ?? -1, stdout, stderr, timedOut, durationMs: performance.now() - startedAt });
         });
       });

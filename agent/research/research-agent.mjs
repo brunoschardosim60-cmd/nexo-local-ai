@@ -4,6 +4,7 @@ import { defineTool } from '../tools/contracts.mjs';
 import { RISK } from '../safety/policies.mjs';
 
 const USER_AGENT = 'NexoLocalAI/2.0 (local research assistant)';
+const SOURCE_QUALITY = Object.freeze({ wikipedia: { authority: 0.72, kind: 'encyclopedia', caveat: 'fonte terciária editável' }, openalex: { authority: 0.88, kind: 'academic-index', caveat: 'índice e metadados não substituem leitura do estudo' }, stackoverflow: { authority: 0.66, kind: 'community-technical', caveat: 'respostas variam em data e qualidade' } });
 const PRIVATE_V4 = /^(?:10\.|127\.|169\.254\.|192\.168\.|172\.(?:1[6-9]|2\d|3[01])\.|0\.|224\.|255\.)/;
 
 function decodeHtml(value = '') {
@@ -91,13 +92,15 @@ export function createResearchAgent({ fetchImpl = fetch, resolveHost = lookup } 
     const fragments = String(question).split(/\b(?:versus|vs\.?|e tamb[eé]m|compare com)\b|[;?]+/i).map(value => value.trim()).filter(value => value.length >= 4);
     const queries = [...new Set([String(question).trim(), ...fragments])].slice(0, 5);
     const batches = await Promise.all(queries.map(query => search({ query, sources, limit: limitPerQuery })));
-    const evidence = batches.flatMap(batch => batch.results.map(result => ({ query: batch.query, title: result.title, url: result.url, source: result.source, evidence: result.evidence || result.snippet, publishedAt: result.publishedAt })));
+    const evidence = batches.flatMap(batch => batch.results.map(result => ({ query: batch.query, title: result.title, url: result.url, source: result.source, evidence: result.evidence || result.snippet, publishedAt: result.publishedAt, quality: SOURCE_QUALITY[result.source] || { authority: 0.5, kind: 'unknown', caveat: 'autoridade não classificada' } })));
     const unique = evidence.filter((item, index, all) => all.findIndex(candidate => candidate.url === item.url) === index);
     const sourceCoverage = Object.fromEntries(sources.map(source => [source, unique.filter(item => item.source === source).length]));
     const gaps = queries.filter(query => !evidence.some(item => item.query === query)).map(query => `Sem resultado para: ${query}`);
     const dates = unique.map(item => item.publishedAt).filter(Boolean).sort((left, right) => String(left).localeCompare(String(right)));
+    const evidenceGraph = { nodes: [...queries.map((query, index) => ({ id: `q-${index + 1}`, type: 'question', label: query })), ...unique.map((item, index) => ({ id: `e-${index + 1}`, type: 'evidence', label: item.title, url: item.url, authority: item.quality.authority }))], edges: unique.map((item, index) => ({ from: `q-${queries.indexOf(item.query) + 1}`, to: `e-${index + 1}`, relation: 'supported-by' })) };
     return {
       question, queries, evidence: unique, sourceCoverage, gaps,
+      evidenceGraph, averageAuthority: unique.length ? unique.reduce((sum, item) => sum + item.quality.authority, 0) / unique.length : 0,
       divergenceSignals: unique.length > 1 ? ['Compare datas, metodologia e autoridade das fontes antes de sintetizar; resultados recuperados não são automaticamente verdadeiros.'] : ['Pouca diversidade de evidência; trate a conclusão como incerta.'],
       dateRange: dates.length ? { oldest: dates[0], newest: dates.at(-1) } : null,
       researchedAt: new Date().toISOString(),
@@ -122,7 +125,7 @@ export function createResearchAgent({ fetchImpl = fetch, resolveHost = lookup } 
     }),
   ];
 
-  return { definitions, search, investigate, extractPage, fetchPage: async (url, options = {}) => { const page = await request(fetchImpl, url, { ...options, resolveHost }); return extractPage(page.text, page.url); }, health: () => ({ providers: Object.keys(providers), paidKeysRequired: false, multiQueryEvidence: true }) };
+  return { definitions, search, investigate, extractPage, fetchPage: async (url, options = {}) => { const page = await request(fetchImpl, url, { ...options, resolveHost }); return extractPage(page.text, page.url); }, health: () => ({ providers: Object.keys(providers), paidKeysRequired: false, multiQueryEvidence: true, sourceQuality: true, evidenceGraph: true }) };
 }
 
 export { extractPage };

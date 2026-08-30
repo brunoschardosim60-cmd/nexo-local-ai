@@ -13,7 +13,7 @@ export function createSemanticEmbeddings({ ollamaUrl, model = 'embeddinggemma', 
     try {
       const response = await fetchImpl(`${String(ollamaUrl || 'http://127.0.0.1:11434').replace(/\/$/, '')}/api/embed`, {
         method: 'POST', headers: { 'content-type': 'application/json' }, signal: controller.signal,
-        body: JSON.stringify({ model, input, truncate: true, keep_alive: '30s' }),
+        body: JSON.stringify({ model, input, truncate: true, keep_alive: 0 }),
       });
       if (!response.ok) throw new Error(`Ollama embeddings respondeu ${response.status}.`);
       const payload = await response.json();

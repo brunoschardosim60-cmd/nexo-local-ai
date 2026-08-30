@@ -27,8 +27,11 @@ export function createAgentConfig(overrides = {}) {
       ...overrides.featureFlags,
     },
     limits: {
-      maxSteps: 14,
+      maxSteps: 60,
       maxRetries: 2,
+      maxToolCalls: 120,
+      maxModelCalls: 90,
+      maxCost: 0,
       maxSelfCorrections: 3,
       maxToolOutput: 24_000,
       contextTokens: 6_000,

@@ -4,11 +4,16 @@ import { validateTaskLimits } from '../safety/policies.mjs';
 const TERMINAL = new Set(['completed', 'completed_with_warnings', 'failed', 'cancelled']);
 function completedSteps(plan) { return plan.filter(step => step.status === 'completed'); }
 
-export function createAgentLoop({ config, database, registry, permissionManager, planner, executor, evaluator, critic = null, memory, rag, logger, taskGraph, checkpoints, contextEngine, eventBus = null }) {
+export function createAgentLoop({ config, database, registry, permissionManager, planner, executor, evaluator, critic = null, memory, rag, logger, taskGraph, checkpoints, contextEngine, eventBus = null, goalEngine = null, specialistRegistry = null, capabilityManager = null }) {
   const backgroundRuns = new Map();
   const graph = taskGraph || { sync: () => [], get: () => [], validate: () => ({ valid: true, errors: [], nodeCount: 0 }) };
   const checkpointStore = checkpoints || { capture: () => null, list: () => [] };
   const contexts = contextEngine || { build: async ({ objective }) => { const [memories, documents] = await Promise.all([memory.search(objective, { limit: 6 }), rag.search(objective, 8)]); return { memories, documents, repository: null, trusted: [], untrusted: [], budget: {} }; } };
+  const controllers = new Map();
+  const specialist = id => specialistRegistry?.get?.(id) || { id: id || 'general', toolNamespaces: [] };
+  const toolsFor = (objective, agent) => registry.discover?.({ objective, namespaces: specialist(agent).toolNamespaces, limit: agent === 'general' ? 20 : 16 }) || registry.describe();
+  const recordModelCall = taskId => database.incrementTaskUsage?.(taskId, { modelCalls: 1 });
+  const executionContext = task => ({ allowedNamespaces: specialist(task.assignedAgent).toolNamespaces, capabilityManager, capabilityId: task.capabilityId, agent: task.assignedAgent, signal: controllers.get(task.id)?.signal });
 
   function snapshot(taskId) {
     const task = database.getTask(taskId); if (!task) return null;
@@ -26,8 +31,12 @@ export function createAgentLoop({ config, database, registry, permissionManager,
   function initializeTask(objective, options = {}) {
     if (typeof objective !== 'string' || objective.trim().length < 5 || objective.length > 4000) throw new Error('Objetivo inválido.');
     const limits = validateTaskLimits(options, config.limits);
-    const assignedAgent = options.assignedAgent || 'general';
-    const task = database.createTask({ objective: objective.trim(), ...limits, parentTaskId: options.parentTaskId || null, assignedAgent });
+    const assignedAgent = options.assignedAgent || specialistRegistry?.suggest?.(objective) || 'general';
+    const goal = goalEngine?.create?.(objective, options) || { objective: objective.trim(), completionState: 'OPEN', acceptanceCriteria: [] };
+    const budgets = { maxSteps: limits.maxSteps, maxRetries: limits.maxRetries, maxToolCalls: limits.maxToolCalls, maxModelCalls: limits.maxModelCalls, maxDurationMs: limits.maxDurationMs, maxCost: limits.maxCost };
+    let task = database.createTask({ objective: objective.trim(), ...limits, parentTaskId: options.parentTaskId || null, assignedAgent, goal, budgets, usage: { modelCalls: 0, toolCalls: 0, tokens: 0, cost: 0 }, workingMemory: { objective: objective.trim(), pending: [], evidence: [] } });
+    controllers.set(task.id, new AbortController());
+    if (capabilityManager) { const grant = capabilityManager.issue({ taskId: task.id, agent: assignedAgent, namespaces: specialist(assignedAgent).toolNamespaces, scopes: options.scopes || ['.'], ttlMs: limits.maxDurationMs }); task = database.updateTask(task.id, { capabilityId: grant.id }); }
     database.addEvent(task.id, 'run.started', 'Execução autônoma iniciada.', { runtime: 'nexo-core-v1' });
     database.addEvent(task.id, 'task.created', 'Tarefa criada e salva localmente.', limits);
     void eventBus?.publish('task.created', { objective: task.objective, limits, parentTaskId: task.parentTaskId, assignedAgent }, { taskId: task.id, source: 'agent-loop' });
@@ -41,7 +50,8 @@ export function createAgentLoop({ config, database, registry, permissionManager,
       let task = database.getTask(taskId); if (!task) throw new Error('Tarefa não encontrada.');
       if (task.plan.length) return run(taskId);
       const context = await contexts.build({ objective: task.objective, task, events: database.getEvents(taskId), runs: database.getToolRuns(taskId) });
-      const plan = await planner.createPlan({ objective: task.objective, preferredSpecialist: task.assignedAgent, tools: registry.describe(), memories: context.memories, documents: context.documents, context });
+      recordModelCall(taskId);
+      const plan = await planner.createPlan({ objective: task.objective, preferredSpecialist: task.assignedAgent, tools: toolsFor(task.objective, task.assignedAgent), memories: context.memories, documents: context.documents, context, signal: controllers.get(taskId)?.signal });
       task = database.updateTask(task.id, { plan, status: 'running' }); graph.sync(task.id, plan);
       const graphValidation = graph.validate(task.id); if (!graphValidation.valid) throw new Error(`Grafo de tarefas inválido: ${graphValidation.errors.join(' ')}`);
       database.addEvent(task.id, 'plan.created', `Plano criado com ${plan.length} etapas.`, { steps: plan.map(step => step.title), graph: graphValidation });
@@ -53,12 +63,14 @@ export function createAgentLoop({ config, database, registry, permissionManager,
     const runs = database.getToolRuns(task.id); const validation = await evaluator.summarize(task, runs);
     const correctionRounds = database.getEvents(task.id).filter(event => event.type === 'critic.replan').length;
     if (validation.verdict !== 'PASS' && critic && correctionRounds < config.limits.maxSelfCorrections && task.stepsUsed < task.maxSteps) {
-      const review = await critic.review({ task, runs, validation, correctionRound: correctionRounds });
+      recordModelCall(task.id);
+      const review = await critic.review({ task, runs, validation, correctionRound: correctionRounds, signal: controllers.get(task.id)?.signal });
       database.addEvent(task.id, 'critic.reviewed', `Critic: ${validation.verdict} — ${review.gap}`, { validation, review, correctionRound: correctionRounds + 1 }, 'warn');
       if (review.decision === 'retry') {
         const completed = completedSteps(task.plan);
         const failedStep = { title: 'Verificação final', description: review.gap, action: null };
-        const recovery = await planner.replan({ task, failedStep, error: `${review.gap}\nNOVA ESTRATÉGIA OBRIGATÓRIA: ${review.strategy}`, completedSteps: completed, priorRuns: runs });
+        recordModelCall(task.id);
+        const recovery = await planner.replan({ task, failedStep, error: `${review.gap}\nNOVA ESTRATÉGIA OBRIGATÓRIA: ${review.strategy}`, completedSteps: completed, priorRuns: runs, signal: controllers.get(task.id)?.signal });
         if (recovery.length) {
           const plan = [...completed, ...recovery];
           database.updateTask(task.id, { plan, currentStep: completed.length, status: 'running', result: validation, completedAt: null }); graph.sync(task.id, plan);
@@ -68,8 +80,11 @@ export function createAgentLoop({ config, database, registry, permissionManager,
         }
       }
     }
-    const completedAt = new Date().toISOString(); const passed = validation.verdict ? validation.verdict === 'PASS' : Boolean(validation.validated); const status = passed ? 'completed' : validation.verdict === 'FAIL' ? 'failed' : 'completed_with_warnings';
-    database.updateTask(task.id, { status, result: validation, completedAt });
+    const evaluatedGoal = goalEngine?.evaluate?.(task.goal, { ...validation, runs, evidence: validation.evidence }) || task.goal;
+    const completedAt = new Date().toISOString(); const passed = goalEngine ? evaluatedGoal?.completionState === 'VERIFIED' : validation.verdict ? validation.verdict === 'PASS' : Boolean(validation.validated); const status = passed ? 'completed' : validation.verdict === 'FAIL' || (goalEngine && evaluatedGoal?.completionState === 'FAILED') ? 'failed' : 'completed_with_warnings';
+    const result = { ...validation, goal: evaluatedGoal, completionState: evaluatedGoal?.completionState || (passed ? 'VERIFIED' : 'UNCERTAIN'), usage: database.getTask(task.id)?.usage || task.usage };
+    database.updateTask(task.id, { status, result, goal: evaluatedGoal, completedAt });
+    capabilityManager?.revoke?.(task.capabilityId); controllers.delete(task.id);
     database.addEvent(task.id, 'run.completed', validation.summary || 'Tarefa concluída.', validation, validation.validated ? 'info' : 'warn');
     const finalEvent = status === 'failed' ? 'task.failed' : 'task.completed';
     database.addEvent(task.id, finalEvent, validation.summary || 'Tarefa concluída.', validation, validation.validated ? 'info' : status === 'failed' ? 'error' : 'warn');
@@ -84,6 +99,7 @@ export function createAgentLoop({ config, database, registry, permissionManager,
 
   async function fail(taskId, error) {
     const task = database.getTask(taskId); if (!task || TERMINAL.has(task.status)) return snapshot(taskId);
+    executor.cancel?.(taskId); capabilityManager?.revoke?.(task.capabilityId); controllers.delete(taskId);
     database.updateTask(taskId, { status: 'failed', error, completedAt: new Date().toISOString() });
     database.addEvent(taskId, 'task.failed', error, null, 'error'); checkpointStore.capture(taskId, 'failure', 'Falha persistida');
     await eventBus?.publish('task.failed', { error }, { taskId, source: 'agent-loop', level: 'error' });
@@ -92,11 +108,15 @@ export function createAgentLoop({ config, database, registry, permissionManager,
 
   async function run(taskId) {
     const trace = createTrace(taskId);
+    if (!controllers.has(taskId)) controllers.set(taskId, new AbortController());
     while (true) {
       let task = database.getTask(taskId); if (!task) throw new Error('Tarefa não encontrada.');
       if (TERMINAL.has(task.status) || task.status === 'paused' || task.status === 'awaiting_approval') return snapshot(taskId);
       if (task.stepsUsed >= task.maxSteps) return fail(taskId, `Limite seguro de ${task.maxSteps} passos atingido.`);
-      if (Date.now() - new Date(task.createdAt).getTime() > config.limits.maxTaskMinutes * 60_000) return fail(taskId, 'Tempo máximo da tarefa atingido.');
+      const budget = task.budgets || {}; const usage = task.usage || {};
+      if ((usage.toolCalls || 0) >= (budget.maxToolCalls || Number.POSITIVE_INFINITY)) return fail(taskId, 'Orçamento de chamadas de ferramentas atingido.');
+      if ((usage.modelCalls || 0) >= (budget.maxModelCalls || Number.POSITIVE_INFINITY)) return fail(taskId, 'Orçamento de chamadas de modelo atingido.');
+      if (Date.now() - new Date(task.createdAt).getTime() > (budget.maxDurationMs || config.limits.maxTaskMinutes * 60_000)) return fail(taskId, 'Tempo máximo da tarefa atingido.');
       if (task.plan.length > 0 && task.plan.every(step => step.status === 'completed')) return finish(task);
       const readyNodes = graph.ready(taskId);
       if (!readyNodes.length) {
@@ -112,7 +132,8 @@ export function createAgentLoop({ config, database, registry, permissionManager,
           const index = plan.findIndex(item => item.id === node.id); const candidate = plan[index];
           if (candidate.action) return { index, action: candidate.action };
           const context = await contexts.build({ objective: `${task.objective}\n${candidate.description}`, task, events: database.getEvents(taskId), runs: database.getToolRuns(taskId) });
-          const action = await planner.selectAction({ task: { ...task, currentStep: index }, step: candidate, tools: registry.describe(), events: database.getEvents(taskId), runs: database.getToolRuns(taskId), memories: context.memories, documents: context.documents, context });
+          recordModelCall(taskId);
+          const action = await planner.selectAction({ task: { ...task, currentStep: index }, step: candidate, tools: toolsFor(`${task.objective}\n${candidate.description}`, candidate.assignedAgent || task.assignedAgent), events: database.getEvents(taskId), runs: database.getToolRuns(taskId), memories: context.memories, documents: context.documents, context, signal: controllers.get(taskId)?.signal });
           registry.get(action.tool); return { index, action };
         }));
         for (const selection of selections) {
@@ -132,7 +153,8 @@ export function createAgentLoop({ config, database, registry, permissionManager,
           if (task.stepsUsed + batch.length > task.maxSteps) return fail(taskId, `O lote paralelo ultrapassaria o limite seguro de ${task.maxSteps} passos.`);
           checkpointStore.capture(taskId, 'before-parallel-batch', `Antes de ${batch.length} etapas independentes`);
           for (const item of batch) database.addEvent(taskId, 'tool.started', `Executando ${item.step.action.tool} em lote paralelo.`, { input: item.step.action.input, stepId: item.step.id });
-          const executions = await Promise.all(batch.map(item => executor.execute({ taskId, stepIndex: item.index, action: item.step.action, maxRetries: task.maxRetries })));
+          database.incrementTaskUsage?.(taskId, { toolCalls: batch.length });
+          const executions = await Promise.all(batch.map(item => executor.execute({ taskId, stepIndex: item.index, action: item.step.action, maxRetries: task.maxRetries, context: executionContext(task) })));
           const evaluations = executions.map((execution, index) => evaluator.evaluateTool(batch[index].step.action, execution)); task = database.getTask(taskId);
           if (task.status === 'cancelled') return snapshot(taskId);
           plan = [...task.plan];
@@ -146,7 +168,8 @@ export function createAgentLoop({ config, database, registry, permissionManager,
           if (failedIndex >= 0) {
             const failed = batch[failedIndex]; const reason = evaluations[failedIndex].reason; const completed = completedSteps(plan);
             database.addEvent(taskId, 'step.failed', `${failed.step.title}: ${reason}`, { tool: failed.step.action.tool, parallelBatch: true }, 'warn');
-            const recovery = await planner.replan({ task: { ...task, plan }, failedStep: failed.step, error: reason, completedSteps: completed, priorRuns: database.getToolRuns(taskId) });
+            recordModelCall(taskId);
+            const recovery = await planner.replan({ task: { ...task, plan }, failedStep: failed.step, error: reason, completedSteps: completed, priorRuns: database.getToolRuns(taskId), signal: controllers.get(taskId)?.signal });
             if (!recovery.length) return fail(taskId, `Não foi possível replanejar após a falha: ${reason}`);
             plan = [...completed, ...recovery]; database.updateTask(taskId, { plan, currentStep: completed.length, stepsUsed: task.stepsUsed + batch.length, status: 'running' }); graph.sync(taskId, plan);
             database.addEvent(taskId, 'task.replanned', 'O plano foi ajustado após falha em lote paralelo.', { recoverySteps: recovery.map(item => item.title) }); checkpointStore.capture(taskId, 'replan', reason); continue;
@@ -172,7 +195,8 @@ export function createAgentLoop({ config, database, registry, permissionManager,
         database.addEvent(taskId, 'step.selecting_tool', `Selecionando ferramenta para: ${step.title}`);
         try {
           const context = await contexts.build({ objective: `${task.objective}\n${step.description}`, task, events: database.getEvents(taskId), runs: database.getToolRuns(taskId) });
-          const action = await planner.selectAction({ task, step, tools: registry.describe(), events: database.getEvents(taskId), runs: database.getToolRuns(taskId), memories: context.memories, documents: context.documents, context });
+          recordModelCall(taskId);
+          const action = await planner.selectAction({ task, step, tools: toolsFor(`${task.objective}\n${step.description}`, step.assignedAgent || task.assignedAgent), events: database.getEvents(taskId), runs: database.getToolRuns(taskId), memories: context.memories, documents: context.documents, context, signal: controllers.get(taskId)?.signal });
           registry.get(action.tool); task = database.getTask(taskId);
           if (TERMINAL.has(task.status) || task.status === 'paused') return snapshot(taskId);
           const plan = [...task.plan]; plan[stepIndex] = { ...step, action, status: 'ready', model: action.model || null, successCriteria: [action.successCriteria] };
@@ -180,7 +204,8 @@ export function createAgentLoop({ config, database, registry, permissionManager,
           database.addEvent(taskId, 'tool.selected', `${action.tool}: ${action.reason}`, { tool: action.tool, input: action.input, successCriteria: action.successCriteria });
         } catch (error) {
           const reason = error instanceof Error ? error.message : 'Falha ao selecionar ferramenta.'; database.addEvent(taskId, 'planner.failed', reason, null, 'warn');
-          const completed = completedSteps(task.plan); const recovery = await planner.replan({ task, failedStep: step, error: reason, completedSteps: completed, priorRuns: database.getToolRuns(taskId) });
+          recordModelCall(taskId);
+          const completed = completedSteps(task.plan); const recovery = await planner.replan({ task, failedStep: step, error: reason, completedSteps: completed, priorRuns: database.getToolRuns(taskId), signal: controllers.get(taskId)?.signal });
           if (!recovery.length) return fail(taskId, `Não foi possível replanejar: ${reason}`);
           const plan = [...completed, ...recovery]; const nextIndex = completed.length;
           database.updateTask(taskId, { plan, currentStep: nextIndex, stepsUsed: task.stepsUsed + 1, status: 'running' }); graph.sync(taskId, plan); checkpointStore.capture(taskId, 'replan', reason); continue;
@@ -209,8 +234,12 @@ export function createAgentLoop({ config, database, registry, permissionManager,
 
       checkpointStore.capture(taskId, 'before-tool', `Antes de ${tool.name}`);
       database.addEvent(taskId, 'tool.started', `Executando ${tool.name}.`, { input: step.action.input });
-      const execution = await executor.execute({ taskId, stepIndex, action: step.action, maxRetries: task.maxRetries });
+      database.incrementTaskUsage?.(taskId, { toolCalls: 1 });
+      const execution = await executor.execute({ taskId, stepIndex, action: step.action, maxRetries: task.maxRetries, context: executionContext(task) });
       const evaluation = evaluator.evaluateTool(step.action, execution); task = database.getTask(taskId);
+      const priorEvidence = Array.isArray(task.workingMemory?.evidence) ? task.workingMemory.evidence : [];
+      database.mergeWorkingMemory?.(taskId, { currentOperation: tool.name, evidence: [...priorEvidence, { tool: tool.name, ok: execution.ok, step: step.title, at: new Date().toISOString() }].slice(-24), lastObservation: evaluation.reason });
+      task = database.getTask(taskId);
       if (task.status === 'cancelled') { database.addEvent(taskId, 'tool.observed_after_cancel', `${tool.name} terminou após o cancelamento.`, { ok: execution.ok }, 'warn'); return snapshot(taskId); }
       if (evaluation.success) {
         const plan = [...task.plan]; plan[stepIndex] = { ...plan[stepIndex], status: 'completed', output: execution.output, attempts: execution.attempt, observations: [...(plan[stepIndex].observations || []), evaluation.reason], completedAt: new Date().toISOString() };
@@ -219,7 +248,8 @@ export function createAgentLoop({ config, database, registry, permissionManager,
       }
 
       database.addEvent(taskId, 'step.failed', `${step.title}: ${evaluation.reason}`, { tool: tool.name, trace: span.finish({ ok: false }) }, 'warn');
-      const completed = completedSteps(task.plan); const recovery = await planner.replan({ task, failedStep: step, error: evaluation.reason, completedSteps: completed, priorRuns: database.getToolRuns(taskId) });
+      recordModelCall(taskId);
+      const completed = completedSteps(task.plan); const recovery = await planner.replan({ task, failedStep: step, error: evaluation.reason, completedSteps: completed, priorRuns: database.getToolRuns(taskId), signal: controllers.get(taskId)?.signal });
       if (!recovery.length) return fail(taskId, `Não foi possível replanejar após a falha: ${evaluation.reason}`);
       const plan = [...completed, ...recovery];
       database.updateTask(taskId, { plan, currentStep: completed.length, stepsUsed: task.stepsUsed + 1, status: 'running' }); graph.sync(taskId, plan);
@@ -257,8 +287,10 @@ export function createAgentLoop({ config, database, registry, permissionManager,
       if (action === 'pause' && ['planning', 'running'].includes(task.status)) {
         database.updateTask(taskId, { status: 'paused' }); database.addEvent(taskId, 'task.paused', 'Tarefa pausada pelo usuário.'); checkpointStore.capture(taskId, 'pause', 'Pausa solicitada');
       } else if (action === 'cancel' && !TERMINAL.has(task.status)) {
+        controllers.get(taskId)?.abort(new Error('Tarefa cancelada pelo usuário.')); executor.cancel?.(taskId); capabilityManager?.revoke?.(task.capabilityId);
         database.updateTask(taskId, { status: 'cancelled', completedAt: new Date().toISOString() }); database.addEvent(taskId, 'task.cancelled', 'Tarefa cancelada pelo usuário.', null, 'warn'); checkpointStore.capture(taskId, 'cancel', 'Cancelamento solicitado');
       } else if (action === 'resume' && task.status === 'paused') {
+        controllers.set(taskId, new AbortController());
         database.updateTask(taskId, { status: task.plan.length ? 'running' : 'planning' }); database.addEvent(taskId, 'task.resumed', 'Tarefa retomada pelo usuário.'); enqueue(taskId, () => task.plan.length ? run(taskId) : prepareAndRun(taskId));
       } else if (!['pause', 'cancel', 'resume'].includes(action)) throw new Error('Ação de controle inválida.');
       return snapshot(taskId);

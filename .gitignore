@@ -41,6 +41,7 @@ next-env.d.ts
 # Nexo local runtime state
 /data/*.db
 /data/*.db-*
+/data/*.log
 /data/logs/
 /data/sessions/
 /data/vectors/

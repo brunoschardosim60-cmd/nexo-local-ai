@@ -87,6 +87,9 @@ const server = createServer(async (request, response) => {
     if (request.method === 'GET' && url.pathname === '/agent/media/jobs') return send(response, 200, { ok: true, jobs: core.mediaQueue.list(Math.min(Number(url.searchParams.get('limit')) || 30, 100)) });
     if (request.method === 'GET' && url.pathname === '/agent/artifacts') return send(response, 200, { ok: true, artifacts: core.artifacts.list(Math.min(Number(url.searchParams.get('limit')) || 30, 100)) });
 
+    const artifactProvenanceMatch = url.pathname.match(/^\/agent\/artifacts\/([^/]+)\/provenance$/);
+    if (request.method === 'GET' && artifactProvenanceMatch) { const provenance = core.artifacts.provenance(artifactProvenanceMatch[1]); return provenance ? send(response, 200, { ok: true, provenance }) : send(response, 404, { error: 'Artefato não encontrado.' }); }
+
     const artifactContentMatch = url.pathname.match(/^\/agent\/artifacts\/([^/]+)\/content$/);
     if (request.method === 'GET' && artifactContentMatch) {
       const artifact = core.artifacts.get(artifactContentMatch[1]); if (!artifact) return send(response, 404, { error: 'Artefato não encontrado.' });

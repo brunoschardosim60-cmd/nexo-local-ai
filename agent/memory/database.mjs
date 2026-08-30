@@ -36,7 +36,7 @@ export function createDatabase(dataDir) {
     )`,
     `CREATE TABLE IF NOT EXISTS tool_runs (
       id TEXT PRIMARY KEY, task_id TEXT NOT NULL, step_index INTEGER NOT NULL,
-      tool TEXT NOT NULL, input_json TEXT NOT NULL, output_json TEXT,
+      tool TEXT NOT NULL, input_json TEXT NOT NULL, output_json TEXT, output_summary_json TEXT,
       status TEXT NOT NULL, attempt INTEGER NOT NULL, duration_ms REAL,
       error TEXT, created_at TEXT NOT NULL,
       FOREIGN KEY(task_id) REFERENCES tasks(id) ON DELETE CASCADE
@@ -114,6 +114,10 @@ export function createDatabase(dataDir) {
       model TEXT, location TEXT NOT NULL, metadata_json TEXT NOT NULL DEFAULT '{}', source_task TEXT,
       created_at TEXT NOT NULL
     )`,
+    `CREATE TABLE IF NOT EXISTS artifact_edges (
+      parent_id TEXT NOT NULL, child_id TEXT NOT NULL, relation TEXT NOT NULL, metadata_json TEXT NOT NULL DEFAULT '{}', created_at TEXT NOT NULL,
+      PRIMARY KEY(parent_id, child_id, relation), FOREIGN KEY(parent_id) REFERENCES artifacts(id) ON DELETE CASCADE, FOREIGN KEY(child_id) REFERENCES artifacts(id) ON DELETE CASCADE
+    )`,
     `CREATE TABLE IF NOT EXISTS media_jobs (
       id TEXT PRIMARY KEY, kind TEXT NOT NULL, status TEXT NOT NULL, priority INTEGER NOT NULL,
       input_json TEXT NOT NULL, artifact_id TEXT, error TEXT, created_at TEXT NOT NULL,
@@ -124,6 +128,25 @@ export function createDatabase(dataDir) {
       runtime_overhead_ms REAL, ttft_ms REAL, total_ms REAL, prompt_tokens INTEGER,
       completion_tokens INTEGER, ram_mb REAL, vram_mb REAL, tool_calls INTEGER NOT NULL DEFAULT 0,
       model_calls INTEGER NOT NULL DEFAULT 0, metadata_json TEXT, created_at TEXT NOT NULL
+    )`,
+    `CREATE TABLE IF NOT EXISTS task_hypotheses (
+      id TEXT PRIMARY KEY, task_id TEXT NOT NULL, hypothesis TEXT NOT NULL, evidence_for_json TEXT NOT NULL DEFAULT '[]',
+      evidence_against_json TEXT NOT NULL DEFAULT '[]', experiment TEXT NOT NULL, outcome TEXT, confidence REAL NOT NULL,
+      status TEXT NOT NULL, created_at TEXT NOT NULL, updated_at TEXT NOT NULL,
+      FOREIGN KEY(task_id) REFERENCES tasks(id) ON DELETE CASCADE
+    )`,
+    `CREATE TABLE IF NOT EXISTS capability_grants (
+      id TEXT PRIMARY KEY, task_id TEXT NOT NULL, agent TEXT NOT NULL, namespaces_json TEXT NOT NULL, scopes_json TEXT NOT NULL,
+      expires_at TEXT NOT NULL, revoked_at TEXT, created_at TEXT NOT NULL,
+      FOREIGN KEY(task_id) REFERENCES tasks(id) ON DELETE CASCADE
+    )`,
+    `CREATE TABLE IF NOT EXISTS agent_messages (
+      id TEXT PRIMARY KEY, task_id TEXT, sender TEXT NOT NULL, receiver TEXT NOT NULL, type TEXT NOT NULL,
+      content_json TEXT NOT NULL, evidence_json TEXT NOT NULL DEFAULT '[]', artifact_ids_json TEXT NOT NULL DEFAULT '[]', created_at TEXT NOT NULL
+    )`,
+    `CREATE TABLE IF NOT EXISTS project_workspaces (
+      id TEXT PRIMARY KEY, root TEXT NOT NULL UNIQUE, name TEXT NOT NULL, state_json TEXT NOT NULL DEFAULT '{}',
+      instructions_json TEXT NOT NULL DEFAULT '{}', created_at TEXT NOT NULL, updated_at TEXT NOT NULL
     )`,
     `CREATE VIRTUAL TABLE IF NOT EXISTS memories_fts USING fts5(
       id UNINDEXED, kind UNINDEXED, content, tokenize='unicode61 remove_diacritics 2'
@@ -159,9 +182,15 @@ export function createDatabase(dataDir) {
   const taskColumns = new Set(db.prepare('PRAGMA table_info(tasks)').all().map(column => column.name));
   if (!taskColumns.has('parent_task_id')) db.prepare('ALTER TABLE tasks ADD COLUMN parent_task_id TEXT').run();
   if (!taskColumns.has('assigned_agent')) db.prepare("ALTER TABLE tasks ADD COLUMN assigned_agent TEXT NOT NULL DEFAULT 'general'").run();
+  if (!taskColumns.has('goal_json')) db.prepare("ALTER TABLE tasks ADD COLUMN goal_json TEXT NOT NULL DEFAULT '{}'").run();
+  if (!taskColumns.has('budgets_json')) db.prepare("ALTER TABLE tasks ADD COLUMN budgets_json TEXT NOT NULL DEFAULT '{}'").run();
+  if (!taskColumns.has('usage_json')) db.prepare("ALTER TABLE tasks ADD COLUMN usage_json TEXT NOT NULL DEFAULT '{}'").run();
+  if (!taskColumns.has('working_memory_json')) db.prepare("ALTER TABLE tasks ADD COLUMN working_memory_json TEXT NOT NULL DEFAULT '{}'").run();
+  if (!taskColumns.has('capability_id')) db.prepare('ALTER TABLE tasks ADD COLUMN capability_id TEXT').run();
   db.prepare('CREATE INDEX IF NOT EXISTS idx_tasks_parent_updated ON tasks(parent_task_id, updated_at)').run();
   const toolRunColumns = new Set(db.prepare('PRAGMA table_info(tool_runs)').all().map(column => column.name));
   if (!toolRunColumns.has('error_kind')) db.prepare('ALTER TABLE tool_runs ADD COLUMN error_kind TEXT').run();
+  if (!toolRunColumns.has('output_summary_json')) db.prepare('ALTER TABLE tool_runs ADD COLUMN output_summary_json TEXT').run();
   db.prepare('INSERT INTO memories_fts (id, kind, content) SELECT m.id, m.kind, m.content FROM memories m WHERE NOT EXISTS (SELECT 1 FROM memories_fts f WHERE f.id = m.id)').run();
   db.prepare('INSERT INTO document_chunks_fts (id, source, content) SELECT d.id, d.source, d.content FROM document_chunks d WHERE NOT EXISTS (SELECT 1 FROM document_chunks_fts f WHERE f.id = d.id)').run();
   db.exec('PRAGMA optimize');
@@ -178,15 +207,16 @@ export function createDatabase(dataDir) {
       plan: json(row.plan_json, []), currentStep: row.current_step, stepsUsed: row.steps_used,
       maxSteps: row.max_steps, maxRetries: row.max_retries,
       parentTaskId: row.parent_task_id, assignedAgent: row.assigned_agent || 'general',
+      goal: json(row.goal_json, {}), budgets: json(row.budgets_json, {}), usage: json(row.usage_json, {}), workingMemory: json(row.working_memory_json, {}), capabilityId: row.capability_id,
       result: json(row.result_json), error: row.error,
       createdAt: row.created_at, updatedAt: row.updated_at, completedAt: row.completed_at,
     };
   }
 
-  function createTask({ objective, maxSteps, maxRetries, parentTaskId = null, assignedAgent = 'general' }) {
+  function createTask({ objective, maxSteps, maxRetries, parentTaskId = null, assignedAgent = 'general', goal = {}, budgets = {}, usage = {}, workingMemory = {}, capabilityId = null }) {
     const id = randomUUID(); const now = new Date().toISOString();
-    db.prepare('INSERT INTO tasks (id, objective, status, max_steps, max_retries, parent_task_id, assigned_agent, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)')
-      .run(id, objective, 'planning', maxSteps, maxRetries, parentTaskId, assignedAgent, now, now);
+    db.prepare('INSERT INTO tasks (id, objective, status, max_steps, max_retries, parent_task_id, assigned_agent, goal_json, budgets_json, usage_json, working_memory_json, capability_id, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)')
+      .run(id, objective, 'planning', maxSteps, maxRetries, parentTaskId, assignedAgent, JSON.stringify(goal), JSON.stringify(budgets), JSON.stringify(usage), JSON.stringify(workingMemory), capabilityId, now, now);
     return getTask(id);
   }
   function getTask(id) { return hydrateTask(db.prepare('SELECT * FROM tasks WHERE id = ?').get(id)); }
@@ -195,10 +225,12 @@ export function createDatabase(dataDir) {
   function updateTask(id, patch) {
     const current = getTask(id); if (!current) throw new Error('Tarefa não encontrada.');
     const next = { ...current, ...patch, updatedAt: new Date().toISOString() };
-    db.prepare(`UPDATE tasks SET status=?, plan_json=?, current_step=?, steps_used=?, result_json=?, error=?, updated_at=?, completed_at=? WHERE id=?`)
-      .run(next.status, JSON.stringify(next.plan || []), next.currentStep, next.stepsUsed, next.result == null ? null : JSON.stringify(next.result), next.error || null, next.updatedAt, next.completedAt || null, id);
+    db.prepare(`UPDATE tasks SET status=?, plan_json=?, current_step=?, steps_used=?, result_json=?, error=?, goal_json=?, budgets_json=?, usage_json=?, working_memory_json=?, capability_id=?, updated_at=?, completed_at=? WHERE id=?`)
+      .run(next.status, JSON.stringify(next.plan || []), next.currentStep, next.stepsUsed, next.result == null ? null : JSON.stringify(next.result), next.error || null, JSON.stringify(next.goal || {}), JSON.stringify(next.budgets || {}), JSON.stringify(next.usage || {}), JSON.stringify(next.workingMemory || {}), next.capabilityId || null, next.updatedAt, next.completedAt || null, id);
     return getTask(id);
   }
+  function incrementTaskUsage(id, patch = {}) { const task = getTask(id); if (!task) throw new Error('Tarefa não encontrada.'); const usage = { modelCalls: 0, toolCalls: 0, tokens: 0, cost: 0, ...task.usage }; for (const [key, value] of Object.entries(patch)) usage[key] = Number(usage[key] || 0) + Number(value || 0); return updateTask(id, { usage }); }
+  function mergeWorkingMemory(id, patch = {}) { const task = getTask(id); if (!task) throw new Error('Tarefa não encontrada.'); return updateTask(id, { workingMemory: { ...task.workingMemory, ...patch, updatedAt: new Date().toISOString() } }); }
   function addEvent(taskId, type, message, data = null, level = 'info') {
     const sequence = Number(db.prepare('SELECT COALESCE(MAX(sequence), 0) + 1 AS next FROM task_events WHERE task_id = ?').get(taskId).next);
     const event = { id: randomUUID(), taskId, sequence, type, level, message, data, createdAt: new Date().toISOString() };
@@ -214,17 +246,18 @@ export function createDatabase(dataDir) {
   }
   function addToolRun(run) {
     const id = randomUUID(); const createdAt = new Date().toISOString();
-    db.prepare('INSERT INTO tool_runs (id, task_id, step_index, tool, input_json, output_json, status, attempt, duration_ms, error, error_kind, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)')
-      .run(id, run.taskId, run.stepIndex, run.tool, JSON.stringify(run.input || {}), run.output == null ? null : JSON.stringify(run.output), run.status, run.attempt, run.durationMs ?? null, run.error || null, run.errorKind || null, createdAt);
+    db.prepare('INSERT INTO tool_runs (id, task_id, step_index, tool, input_json, output_json, output_summary_json, status, attempt, duration_ms, error, error_kind, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)')
+      .run(id, run.taskId, run.stepIndex, run.tool, JSON.stringify(run.input || {}), run.output == null ? null : JSON.stringify(run.output), run.summary == null ? null : JSON.stringify(run.summary), run.status, run.attempt, run.durationMs ?? null, run.error || null, run.errorKind || null, createdAt);
     return { id, ...run, createdAt };
   }
   function getToolRuns(taskId) {
     return db.prepare('SELECT * FROM tool_runs WHERE task_id = ? ORDER BY created_at ASC').all(taskId).map(row => ({
       id: row.id, taskId: row.task_id, stepIndex: row.step_index, tool: row.tool,
-      input: json(row.input_json, {}), output: json(row.output_json), status: row.status,
+      input: json(row.input_json, {}), output: json(row.output_summary_json, json(row.output_json)), status: row.status,
       attempt: row.attempt, durationMs: row.duration_ms, error: row.error, errorKind: row.error_kind, createdAt: row.created_at,
     }));
   }
+  function getToolRunFull(id) { const row = db.prepare('SELECT * FROM tool_runs WHERE id=?').get(id); if (!row) return null; return { id: row.id, taskId: row.task_id, stepIndex: row.step_index, tool: row.tool, input: json(row.input_json, {}), output: json(row.output_json), summary: json(row.output_summary_json, json(row.output_json)), status: row.status, attempt: row.attempt, durationMs: row.duration_ms, error: row.error, errorKind: row.error_kind, createdAt: row.created_at }; }
   function createPermission(permission) {
     const record = { id: randomUUID(), status: 'pending', createdAt: new Date().toISOString(), ...permission };
     db.prepare('INSERT INTO permissions (id, task_id, tool, scope, risk, status, reason, input_json, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)')
@@ -461,6 +494,8 @@ export function createDatabase(dataDir) {
       .run(id, type, mimeType, provider, model, location, JSON.stringify(metadata), sourceTask, createdAt);
     return getArtifact(id);
   }
+  function linkArtifacts({ parentId, childId, relation = 'derived-from', metadata = {} }) { const createdAt = new Date().toISOString(); db.prepare('INSERT OR REPLACE INTO artifact_edges (parent_id,child_id,relation,metadata_json,created_at) VALUES (?,?,?,?,?)').run(parentId, childId, relation, JSON.stringify(metadata), createdAt); return { parentId, childId, relation, metadata, createdAt }; }
+  function getArtifactProvenance(id) { const artifact = getArtifact(id); if (!artifact) return null; const hydrate = row => ({ parentId: row.parent_id, childId: row.child_id, relation: row.relation, metadata: json(row.metadata_json, {}), createdAt: row.created_at }); return { artifact, parents: db.prepare('SELECT * FROM artifact_edges WHERE child_id=? ORDER BY created_at').all(id).map(hydrate), children: db.prepare('SELECT * FROM artifact_edges WHERE parent_id=? ORDER BY created_at').all(id).map(hydrate) }; }
   function getArtifact(id) { const row = db.prepare('SELECT * FROM artifacts WHERE id = ?').get(id); return row ? { id: row.id, type: row.type, mimeType: row.mime_type, provider: row.provider, model: row.model, location: row.location, metadata: json(row.metadata_json, {}), sourceTask: row.source_task, createdAt: row.created_at } : null; }
   function listArtifacts(limit = 100) { return db.prepare('SELECT id FROM artifacts ORDER BY created_at DESC LIMIT ?').all(Math.max(1, Math.min(Number(limit) || 100, 500))).map(row => getArtifact(row.id)); }
   function createMediaJob({ kind, priority = 5, input = {} }) {
@@ -481,8 +516,21 @@ export function createDatabase(dataDir) {
   }
   function listPerformanceSamples(limit = 500) { return db.prepare('SELECT * FROM performance_samples ORDER BY created_at DESC LIMIT ?').all(Math.max(1, Math.min(Number(limit) || 500, 5000))).map(row => ({ id: row.id, route: row.route, cold: Boolean(row.cold), runtimeOverheadMs: row.runtime_overhead_ms, ttftMs: row.ttft_ms, totalMs: row.total_ms, promptTokens: row.prompt_tokens, completionTokens: row.completion_tokens, ramMB: row.ram_mb, vramMB: row.vram_mb, toolCalls: row.tool_calls, modelCalls: row.model_calls, metadata: json(row.metadata_json, {}), createdAt: row.created_at })); }
 
+  function putHypothesis(value) { const now = new Date().toISOString(); const record = { id: randomUUID(), ...value, createdAt: now, updatedAt: now }; db.prepare('INSERT INTO task_hypotheses (id, task_id, hypothesis, evidence_for_json, evidence_against_json, experiment, outcome, confidence, status, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)').run(record.id, record.taskId, record.hypothesis, JSON.stringify(record.evidenceFor || []), JSON.stringify(record.evidenceAgainst || []), record.experiment, record.outcome || null, record.confidence ?? 0.5, record.status || 'OPEN', now, now); return getHypothesis(record.id); }
+  function getHypothesis(id) { const row = db.prepare('SELECT * FROM task_hypotheses WHERE id=?').get(id); return row ? { id: row.id, taskId: row.task_id, hypothesis: row.hypothesis, evidenceFor: json(row.evidence_for_json, []), evidenceAgainst: json(row.evidence_against_json, []), experiment: row.experiment, outcome: row.outcome, confidence: row.confidence, status: row.status, createdAt: row.created_at, updatedAt: row.updated_at } : null; }
+  function updateHypothesis(id, patch = {}) { const current = getHypothesis(id); if (!current) throw new Error('Hipótese não encontrada.'); const next = { ...current, ...patch, updatedAt: new Date().toISOString() }; db.prepare('UPDATE task_hypotheses SET evidence_for_json=?, evidence_against_json=?, experiment=?, outcome=?, confidence=?, status=?, updated_at=? WHERE id=?').run(JSON.stringify(next.evidenceFor), JSON.stringify(next.evidenceAgainst), next.experiment, next.outcome || null, next.confidence, next.status, next.updatedAt, id); return getHypothesis(id); }
+  function listHypotheses(taskId) { return db.prepare('SELECT id FROM task_hypotheses WHERE task_id=? ORDER BY created_at').all(taskId).map(row => getHypothesis(row.id)); }
+  function createCapabilityGrant({ taskId, agent, namespaces = [], scopes = [], expiresAt }) { const record = { id: randomUUID(), taskId, agent, namespaces, scopes, expiresAt, createdAt: new Date().toISOString() }; db.prepare('INSERT INTO capability_grants (id, task_id, agent, namespaces_json, scopes_json, expires_at, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)').run(record.id, taskId, agent, JSON.stringify(namespaces), JSON.stringify(scopes), expiresAt, record.createdAt); return getCapabilityGrant(record.id); }
+  function getCapabilityGrant(id) { const row = db.prepare('SELECT * FROM capability_grants WHERE id=?').get(id); return row ? { id: row.id, taskId: row.task_id, agent: row.agent, namespaces: json(row.namespaces_json, []), scopes: json(row.scopes_json, []), expiresAt: row.expires_at, revokedAt: row.revoked_at, createdAt: row.created_at } : null; }
+  function revokeCapabilityGrant(id) { db.prepare('UPDATE capability_grants SET revoked_at=? WHERE id=?').run(new Date().toISOString(), id); return getCapabilityGrant(id); }
+  function addAgentMessage(message) { const record = { id: randomUUID(), ...message, createdAt: new Date().toISOString() }; db.prepare('INSERT INTO agent_messages (id, task_id, sender, receiver, type, content_json, evidence_json, artifact_ids_json, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)').run(record.id, record.taskId || null, record.sender, record.receiver, record.type, JSON.stringify(record.content || {}), JSON.stringify(record.evidence || []), JSON.stringify(record.artifactIds || []), record.createdAt); return record; }
+  function listAgentMessages(taskId, limit = 100) { return db.prepare('SELECT * FROM agent_messages WHERE task_id=? ORDER BY created_at LIMIT ?').all(taskId, limit).map(row => ({ id: row.id, taskId: row.task_id, sender: row.sender, receiver: row.receiver, type: row.type, content: json(row.content_json, {}), evidence: json(row.evidence_json, []), artifactIds: json(row.artifact_ids_json, []), createdAt: row.created_at })); }
+  function putProjectWorkspace({ root, name, state = {}, instructions = {} }) { const now = new Date().toISOString(); const current = getProjectWorkspace(root); const id = current?.id || randomUUID(); db.prepare(`INSERT INTO project_workspaces (id,root,name,state_json,instructions_json,created_at,updated_at) VALUES (?,?,?,?,?,?,?) ON CONFLICT(root) DO UPDATE SET name=excluded.name,state_json=excluded.state_json,instructions_json=excluded.instructions_json,updated_at=excluded.updated_at`).run(id, root, name, JSON.stringify(state), JSON.stringify(instructions), current?.createdAt || now, now); return getProjectWorkspace(root); }
+  function getProjectWorkspace(root) { const row = db.prepare('SELECT * FROM project_workspaces WHERE root=?').get(root); return row ? { id: row.id, root: row.root, name: row.name, state: json(row.state_json, {}), instructions: json(row.instructions_json, {}), createdAt: row.created_at, updatedAt: row.updated_at } : null; }
+  function listProjectWorkspaces(limit = 50) { return db.prepare('SELECT root FROM project_workspaces ORDER BY updated_at DESC LIMIT ?').all(limit).map(row => getProjectWorkspace(row.root)); }
+
   return {
-    db, createTask, getTask, listTasks, listChildTasks, updateTask, addEvent, getEvents, addToolRun, getToolRuns,
+    db, createTask, getTask, listTasks, listChildTasks, updateTask, incrementTaskUsage, mergeWorkingMemory, addEvent, getEvents, addToolRun, getToolRuns, getToolRunFull,
     createPermission, resolvePermission, getPermission, getPermissions, putMemory, listMemories, touchMemory, updateMemoryVector, reinforceMemory, contradictMemory, forgetMemories, searchMemoriesText,
     replaceDocumentChunks, listDocumentChunks, updateDocumentChunkVector, searchDocumentChunksText, putSession, getSession, replaceTaskGraph, getTaskGraph,
     putCheckpoint, listCheckpoints, pruneCheckpoints, putRepositoryMap, getRepositoryMap, listInterruptedTasks,
@@ -490,6 +538,8 @@ export function createDatabase(dataDir) {
     setSkillEnabled, getSkillStates, putBrowserSession, getBrowserSession, listBrowserSessions,
     listPersonalityTraits, upsertPersonalityTrait, addPersonalityObservation, listPersonalityObservations, resetPersonality,
     upsertModelBenchmark, listModelBenchmarks,
-    putArtifact, getArtifact, listArtifacts, createMediaJob, getMediaJob, updateMediaJob, listMediaJobs, addPerformanceSample, listPerformanceSamples,
+    putArtifact, getArtifact, listArtifacts, linkArtifacts, getArtifactProvenance, createMediaJob, getMediaJob, updateMediaJob, listMediaJobs, addPerformanceSample, listPerformanceSamples,
+    putHypothesis, getHypothesis, updateHypothesis, listHypotheses, createCapabilityGrant, getCapabilityGrant, revokeCapabilityGrant,
+    addAgentMessage, listAgentMessages, putProjectWorkspace, getProjectWorkspace, listProjectWorkspaces,
   };
 }

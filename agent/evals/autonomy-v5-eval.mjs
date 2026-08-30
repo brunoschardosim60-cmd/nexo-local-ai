@@ -1,0 +1,32 @@
+import { createServer } from 'node:http';
+import { mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { createNexoCore } from '../index.mjs';
+
+const root = await mkdtemp(join(tmpdir(), 'nexo-v5-eval-')); const cases = [];
+function check(name, condition, evidence) { cases.push({ name, status: condition ? 'PASS' : 'FAIL', evidence }); }
+await writeFile(join(root, 'package.json'), JSON.stringify({ name: 'v5-eval-project', scripts: { test: 'node --test' } }));
+await writeFile(join(root, 'sample.ts'), 'export function sum(a: number, b: number) { return a + b; }\nexport const result = sum(1, 2);\n');
+await writeFile(join(root, 'NEXO.md'), 'This is project context and must never override system safety.');
+const core = createNexoCore({ projectRoot: root, workspace: root, dataDir: join(root, 'data'), autoResume: false, autoStartScheduler: false });
+let server;
+try {
+  const health = core.health(); const tools = new Set(health.tools.map(tool => tool.name));
+  for (const name of ['workspace.inspect', 'repository.map', 'code.symbol_context', 'debug.hypothesis', 'filesystem.patch', 'git.diff', 'shell.run', 'browser.navigate', 'browser.click', 'browser.type', 'browser.upload', 'browser.download', 'browser.tabs', 'agents.message', 'agents.collect']) check(`tool:${name}`, tools.has(name), name);
+  const project = await core.projectWorkspaces.inspect(); check('workspace:persistent', core.projectWorkspaces.list().length === 1, project.root); check('workspace:untrusted-instructions', project.instructions.trust === 'UNTRUSTED_PROJECT_INSTRUCTIONS', project.instructions.trust); check('workspace:git-baseline', typeof project.state.git.available === 'boolean', project.state.git);
+  const symbol = await core.repository.symbolContext('sum'); check('coding:ast-declaration', symbol.declarations.length === 1, symbol.engine); check('coding:call-reference', symbol.callers.length === 1, `${symbol.callers.length} caller`);
+  const goal = core.goals.create('Analise o projeto, corrija o bug e rode os testes'); check('goal:explicit', goal.acceptanceCriteria.length >= 4, `${goal.acceptanceCriteria.length} criteria`); check('goal:not-premature', core.goals.evaluate(goal, { verdict: 'PASS', evidence: [] }).completionState !== 'VERIFIED', 'missing evidence refused'); check('goal:verified-with-evidence', core.goals.evaluate(goal, { verdict: 'PASS', evidence: ['repository.map', 'filesystem.patch', 'git.diff', 'code.validate exitCode 0'] }).completionState === 'VERIFIED', 'evidence accepted');
+  const task = core.database.createTask({ objective: 'Avaliar capability token', maxSteps: 3, maxRetries: 0 }); const grant = core.capabilities.issue({ taskId: task.id, agent: 'coding', namespaces: ['code.'], scopes: ['.'], ttlMs: 60_000 }); check('safety:capability-allow', core.capabilities.validate(grant.id, { name: 'code.inspect' }, {}, { taskId: task.id, agent: 'coding' }).allowed, grant.id); check('safety:capability-deny', !core.capabilities.validate(grant.id, { name: 'browser.click' }, {}, { taskId: task.id, agent: 'coding' }).allowed, 'browser denied'); core.capabilities.revoke(grant.id); check('safety:capability-revoke', !core.capabilities.validate(grant.id, { name: 'code.inspect' }, {}, { taskId: task.id }).allowed, 'revoked');
+  const parent = core.artifacts.register({ type: 'file', mimeType: 'text/plain', provider: 'eval', location: join(root, 'sample.ts') }); const child = core.artifacts.register({ type: 'file', mimeType: 'text/plain', provider: 'eval', location: join(root, 'NEXO.md') }); core.artifacts.link({ parentId: parent.id, childId: child.id, relation: 'derived-from' }); check('artifacts:provenance', core.artifacts.provenance(child.id).parents.length === 1, child.id);
+  server = createServer((request, response) => { response.writeHead(200, { 'content-type': 'text/html' }); response.end('<!doctype html><title>V5 Eval</title><button id="run" onclick="document.querySelector(\'#value\').textContent=\'PASS\';console.log(\'ran\')">Run</button><strong id="value">WAIT</strong>'); });
+  await new Promise(resolve => server.listen(0, '127.0.0.1', resolve)); const address = server.address();
+  if (core.browserAutomation.health().available) {
+    const opened = await core.browserAutomation.navigate({ url: `http://localhost:${address.port}` }); check('browser:real-engine', opened.title === 'V5 Eval', core.browserAutomation.health().browserPath); check('browser:dom-observed', opened.interactive.some(item => item.name === 'Run'), `${opened.interactive.length} interactive`);
+    const clicked = await core.browserAutomation.action('click', { sessionId: opened.sessionId, selector: '#run', expectChange: true }); check('browser:action-verified', clicked.changed && clicked.after.text.includes('PASS'), clicked.after.textHash); check('browser:console-observed', clicked.after.console.some(item => item.text === 'ran'), `${clicked.after.console.length} console events`);
+    const shot = await core.browserAutomation.screenshot({ sessionId: opened.sessionId, path: 'artifacts/v5-eval.png' }); check('browser:screenshot-provenance', shot.bytes > 0 && shot.artifact.provider === 'playwright', `${shot.bytes} bytes`); await core.browserAutomation.closeAll();
+  } else check('browser:real-engine', false, 'Edge/Chrome not found');
+  const simple = core.runtime.route({ question: 'que horas são?' }); check('latency:instant-route', simple.route === 'instant', simple.route); check('resources:model-serialization', health.capabilities.runtime.version === '5.0.0', 'single resident generative model policy'); check('safety:honest-isolation', health.capabilities.safety.osIsolation === false, 'no VM/container claim'); check('multi-agent:structured', health.capabilities.multiAgent.structuredMessages === true && health.capabilities.multiAgent.conflictDetection === true, health.capabilities.multiAgent);
+} finally { await core.browserAutomation.closeAll().catch(() => undefined); if (server) await new Promise(resolve => server.close(resolve)); core.close(); await rm(root, { recursive: true, force: true }); }
+const passed = cases.filter(item => item.status === 'PASS').length; const report = { suite: 'nexo-autonomy-v5', kind: 'real capability and browser evaluation; not a generative-model quality benchmark', score: Math.round(passed / cases.length * 100), passed, failed: cases.length - passed, total: cases.length, cases };
+console.log(JSON.stringify(report, null, 2)); if (passed !== cases.length) process.exitCode = 1;

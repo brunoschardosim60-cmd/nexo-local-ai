@@ -1,6 +1,6 @@
 const PROFILES = Object.freeze({
   general: { label: 'Geral', purpose: 'Coordenar tarefas variadas e manter o objetivo e as permissões.', toolNamespaces: [] },
-  coding: { label: 'Programação', purpose: 'Investigar repositórios, aplicar mudanças mínimas, testar e revisar diffs.', toolNamespaces: ['repository.', 'code.', 'filesystem.', 'git.', 'shell.'] },
+  coding: { label: 'Programação', purpose: 'Investigar repositórios, formular hipóteses, aplicar mudanças mínimas, testar e revisar diffs.', toolNamespaces: ['repository.', 'code.', 'debug.', 'filesystem.', 'git.', 'shell.', 'browser.'] },
   research: { label: 'Pesquisa', purpose: 'Buscar fontes, comparar evidências, registrar URLs e separar fatos de inferências.', toolNamespaces: ['research.', 'browser.', 'rag.'] },
   browser: { label: 'Navegador', purpose: 'Navegar por páginas observadas, seguir links e capturar previews com segurança.', toolNamespaces: ['browser.', 'visual.'] },
   document: { label: 'Documentos', purpose: 'Ler, estruturar, resumir e validar conteúdo documental.', toolNamespaces: ['filesystem.', 'rag.'] },
@@ -11,6 +11,7 @@ export function createSpecialistRegistry() {
   return {
     list() { return Object.entries(PROFILES).map(([id, profile]) => ({ id, ...profile })); },
     get(id = 'general') { return { id: PROFILES[id] ? id : 'general', ...(PROFILES[id] || PROFILES.general) }; },
+    allowedNamespaces(id = 'general') { return [...this.get(id).toolNamespaces]; },
     suggest(objective) {
       if (/pesquis|fonte|artigo|web|internet|not[ií]cia/i.test(objective)) return 'research';
       if (/site|p[aá]gina|browser|naveg|screenshot|visual/i.test(objective)) return 'browser';

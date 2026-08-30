@@ -81,7 +81,7 @@ export function createBrowserAgent({ workspace, database, research, browserPath 
       inputSchema: { type: 'object', required: ['sessionId', 'linkIndex'], additionalProperties: false, properties: { sessionId: { type: 'string', minLength: 10, maxLength: 100 }, linkIndex: { type: 'integer', minimum: 0, maximum: 59 } } }, execute: follow,
     }),
     defineTool({
-      name: 'browser.screenshot', description: 'Captura uma página com Chrome/Edge headless em um PNG dentro do workspace.', risk: RISK.EXECUTE,
+      name: 'browser.capture_url', description: 'Captura diretamente uma URL com Chrome/Edge headless, sem manter sessão interativa.', risk: RISK.EXECUTE,
       inputSchema: { type: 'object', required: ['url'], additionalProperties: false, properties: { url: { type: 'string', minLength: 8, maxLength: 2000 }, path: { type: 'string', maxLength: 500 }, width: { type: 'integer', minimum: 320, maximum: 3840, default: 1440 }, height: { type: 'integer', minimum: 320, maximum: 2160, default: 900 } } }, execute: screenshot,
     }),
     defineTool({

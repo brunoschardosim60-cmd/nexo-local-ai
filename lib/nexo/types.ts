@@ -53,9 +53,13 @@ export type AgentTask = {
   id: string; objective: string; status: string; plan: AgentTaskStep[]; graph?: AgentTaskNode[]; checkpoints?: AgentCheckpoint[];
   parentTaskId?: string | null; assignedAgent?: string; children?: Array<{ id: string; objective: string; status: string; assignedAgent?: string }>;
   currentStep: number; stepsUsed: number; maxSteps: number; maxRetries: number;
+  goal?: { objective: string; completionState: 'OPEN' | 'VERIFIED' | 'FAILED' | 'UNCERTAIN'; constraints: string[]; acceptanceCriteria: Array<{ id: string; criterion: string; status: 'PASS' | 'FAIL' | 'UNCERTAIN' | 'NOT_CHECKED'; evidence: string[] }>; requiredEvidence: string[] };
+  budgets?: { maxSteps?: number; maxRetries?: number; maxToolCalls?: number; maxModelCalls?: number; maxDurationMs?: number; maxCost?: number };
+  usage?: { modelCalls?: number; toolCalls?: number; tokens?: number; cost?: number };
+  workingMemory?: { currentOperation?: string; lastObservation?: string; evidence?: Array<{ tool: string; ok: boolean; step: string; at: string }> };
   result?: {
     verdict?: 'PASS' | 'FAIL' | 'UNCERTAIN'; validated?: boolean; confidence?: number; summary?: string; evidence?: string[]; remainingRisks?: string[];
-    acceptanceCriteria?: Array<{ criterion: string; met: boolean }>;
+    completionState?: string; goal?: AgentTask['goal']; acceptanceCriteria?: Array<{ criterion: string; met: boolean }>;
   };
   error?: string; permissions: AgentPermission[]; events: AgentTaskEvent[];
 };
@@ -72,7 +76,7 @@ export type AgentHealth = {
       personality?: { adaptive: boolean; learnedTraits: number; observations: number };
       safety?: { processIsolation: string; osIsolation: boolean; shell: boolean };
       research?: { providers: string[]; paidKeysRequired: boolean };
-      browser?: { available: boolean; engine?: string | null; screenshots: boolean; persistentSessions: boolean };
+      browser?: { legacy?: { available: boolean; engine?: string | null; screenshots: boolean; persistentSessions: boolean }; automation?: { available: boolean; engine?: string | null; activeSessions: number; actions: string[]; observations: string[] } };
       coding?: { checks: string[]; repositoryAware: boolean };
       skills?: { loaded: number; enabled: number; roots: string[] };
       specialists?: Array<{ id: string; label: string; purpose: string }>;

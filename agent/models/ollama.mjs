@@ -7,9 +7,18 @@ function parseJson(content) {
   }
 }
 
+let modelTail = Promise.resolve(); let residentModel = null;
+async function acquireModelLease() { let release; const previous = modelTail; modelTail = new Promise(resolve => { release = resolve; }); await previous; return release; }
+
 export function createOllamaClient(config) {
+  async function selectModel(model) {
+    if (!residentModel || residentModel === model) { residentModel = model; return; }
+    await fetch(`${config.ollamaUrl}/api/generate`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ model: residentModel, prompt: '', stream: false, keep_alive: 0 }) }).catch(() => undefined);
+    residentModel = model;
+  }
   return {
     async warm(model, numContext = 4096, timeoutMs = 45_000) {
+      const release = await acquireModelLease(); await selectModel(model);
       const controller = new AbortController(); const timer = setTimeout(() => controller.abort(), timeoutMs);
       try {
         const response = await fetch(`${config.ollamaUrl}/api/generate`, {
@@ -18,15 +27,18 @@ export function createOllamaClient(config) {
         });
         if (!response.ok) throw new Error(`Ollama respondeu ${response.status}.`);
         return { model, numContext, ready: true };
-      } finally { clearTimeout(timer); }
+      } finally { clearTimeout(timer); release(); }
     },
-    async json({ model, system, prompt, temperature = 0.15, numPredict = 1400, timeoutMs = 120_000 }) {
+    async json({ model, system, prompt, temperature = 0.15, numPredict = 1400, timeoutMs = 120_000, signal = null }) {
+      const release = await acquireModelLease(); await selectModel(model);
       const controller = new AbortController(); const timer = setTimeout(() => controller.abort(), timeoutMs);
+      const abort = () => controller.abort(signal?.reason);
+      if (signal?.aborted) abort(); else signal?.addEventListener?.('abort', abort, { once: true });
       try {
         const response = await fetch(`${config.ollamaUrl}/api/chat`, {
           method: 'POST', headers: { 'Content-Type': 'application/json' }, signal: controller.signal,
           body: JSON.stringify({
-            model, stream: false, format: 'json', keep_alive: '30m',
+            model, stream: false, format: 'json', keep_alive: '3m',
             options: { temperature, top_p: 0.9, repeat_penalty: 1.1, num_ctx: 6144, num_predict: numPredict },
             messages: [{ role: 'system', content: system }, { role: 'user', content: prompt }],
           }),
@@ -34,9 +46,10 @@ export function createOllamaClient(config) {
         if (!response.ok) throw new Error(`Ollama respondeu ${response.status}.`);
         const data = await response.json();
         return parseJson(data.message?.content);
-      } finally { clearTimeout(timer); }
+      } finally { clearTimeout(timer); signal?.removeEventListener?.('abort', abort); release(); }
     },
     async *stream({ model, messages, temperature = 0.28, numPredict = 600, numContext = 4096, stop = [], timeoutMs = 120_000, signal = null }) {
+      const release = await acquireModelLease(); await selectModel(model);
       const controller = new AbortController(); const abort = () => controller.abort();
       if (signal?.aborted) controller.abort(); else signal?.addEventListener?.('abort', abort, { once: true });
       const timer = setTimeout(() => controller.abort(), timeoutMs);
@@ -44,7 +57,7 @@ export function createOllamaClient(config) {
         const response = await fetch(`${config.ollamaUrl}/api/chat`, {
           method: 'POST', headers: { 'Content-Type': 'application/json' }, signal: controller.signal,
           body: JSON.stringify({
-            model, stream: true, keep_alive: '30m',
+            model, stream: true, keep_alive: '3m',
             options: { temperature, top_p: 0.9, repeat_penalty: 1.1, num_ctx: numContext, num_predict: numPredict, ...(stop.length ? { stop } : {}) },
             messages,
           }),
@@ -68,7 +81,7 @@ export function createOllamaClient(config) {
           if (data.done) yield { type: 'metrics', metrics: { totalDuration: data.total_duration, loadDuration: data.load_duration, promptTokens: data.prompt_eval_count, promptDuration: data.prompt_eval_duration, outputTokens: data.eval_count, outputDuration: data.eval_duration } };
         }
       } finally {
-        clearTimeout(timer); signal?.removeEventListener?.('abort', abort);
+        clearTimeout(timer); signal?.removeEventListener?.('abort', abort); release();
       }
     },
   };

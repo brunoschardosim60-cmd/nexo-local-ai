@@ -24,6 +24,21 @@ export function createMultiAgentCoordinator({ database, eventBus, maxParallel = 
     return { parentTaskId, complete: tasks.length > 0 && tasks.every(task => ['completed', 'completed_with_warnings', 'failed', 'cancelled'].includes(task.status)), tasks: tasks.map(task => ({ id: task.id, objective: task.objective, assignedAgent: task.assignedAgent, status: task.status, result: task.result, error: task.error })) };
   }
 
+  function message({ receiver, type = 'finding', content, evidence = [], artifactIds = [] }, context = {}) {
+    return database.addAgentMessage({ taskId: context.taskId || null, sender: context.agent || 'general', receiver, type, content, evidence, artifactIds });
+  }
+
+  function collect({ parentTaskId }) {
+    const summary = status({ parentTaskId }); const messages = database.listAgentMessages(parentTaskId);
+    const artifactOwners = new Map(); const conflicts = [];
+    for (const task of summary.tasks) for (const artifact of task.result?.artifacts || []) {
+      const key = artifact.path || artifact.location || artifact.id; if (!key) continue;
+      if (artifactOwners.has(key) && artifactOwners.get(key) !== task.id) conflicts.push({ resource: key, tasks: [artifactOwners.get(key), task.id], resolution: 'SUPERVISOR_REVIEW_REQUIRED' });
+      else artifactOwners.set(key, task.id);
+    }
+    return { ...summary, messages, conflicts, verdict: conflicts.length ? 'UNCERTAIN' : summary.complete ? 'READY_FOR_VERIFICATION' : 'IN_PROGRESS' };
+  }
+
   const definitions = [
     defineTool({
       name: 'agents.delegate', description: 'Delega de duas a quatro subtarefas independentes a especialistas que executam em paralelo e mantêm permissões próprias.', risk: RISK.WRITE,
@@ -49,7 +64,9 @@ export function createMultiAgentCoordinator({ database, eventBus, maxParallel = 
       inputSchema: { type: 'object', additionalProperties: false, properties: { taskIds: { type: 'array', maxItems: maxParallel, items: { type: 'string', minLength: 10, maxLength: 100 } }, parentTaskId: { type: 'string', minLength: 10, maxLength: 100 } } },
       execute: status,
     }),
+    defineTool({ name: 'agents.message', description: 'Envia uma mensagem estruturada entre especialistas com evidências e artefatos rastreáveis.', risk: RISK.WRITE, inputSchema: { type: 'object', required: ['receiver', 'content'], additionalProperties: false, properties: { receiver: { type: 'string', enum: SPECIALISTS }, type: { type: 'string', enum: ['request', 'finding', 'blocker', 'review', 'handoff'] }, content: { type: 'object' }, evidence: { type: 'array', maxItems: 20, items: { type: 'string', maxLength: 2000 } }, artifactIds: { type: 'array', maxItems: 20, items: { type: 'string', maxLength: 100 } } } }, execute: message }),
+    defineTool({ name: 'agents.collect', description: 'Supervisor coleta resultados, mensagens e conflitos de escrita antes da síntese.', risk: RISK.READ, inputSchema: { type: 'object', required: ['parentTaskId'], additionalProperties: false, properties: { parentTaskId: { type: 'string', minLength: 10, maxLength: 100 } } }, execute: collect }),
   ];
 
-  return { definitions, delegate, status, setLoop(value) { loop = value; }, health: () => ({ enabled: Boolean(loop), maxParallel, specialists: SPECIALISTS }) };
+  return { definitions, delegate, status, message, collect, setLoop(value) { loop = value; }, health: () => ({ enabled: Boolean(loop), maxParallel, specialists: SPECIALISTS, structuredMessages: true, conflictDetection: true, leastPrivilege: true }) };
 }

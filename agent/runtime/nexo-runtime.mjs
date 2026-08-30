@@ -48,12 +48,12 @@ export function createNexoRuntime({ config, memory, rag, ollama, research, loop,
     const weather = input.weather && typeof input.weather === 'object' ? input.weather : null;
     const decision = routeIntent({ question, mode, effort, hasDocuments: documents.length > 0, webSearch: Boolean(input.webSearch), weather });
     const complexity = estimator?.estimate?.({ question, mode, attachments: input.attachments, webSearch: input.webSearch }) || null;
+    if (decision.route === 'instant') { queueMicrotask(() => void eventBus?.publish('runtime.routed', { route: decision.route, context: decision.context, reason: decision.reason }, { source: 'nexo-runtime-v5' })); return { kind: 'instant', route: 'instant', content: decision.answer, model: 'Determinístico', context: decision.context, complexity, epistemic: assessKnowledge({ direct: true }) }; }
     personality.observe(question, decision.context);
-    await eventBus?.publish('runtime.routed', { route: decision.route, context: decision.context, reason: decision.reason }, { source: 'nexo-runtime-v4' });
-
-    if (decision.route === 'instant') return { kind: 'instant', route: 'instant', content: decision.answer, model: 'Determinístico', context: decision.context, complexity, epistemic: assessKnowledge({ direct: true }) };
+    await eventBus?.publish('runtime.routed', { route: decision.route, context: decision.context, reason: decision.reason }, { source: 'nexo-runtime-v5' });
     if (decision.route === 'agent') {
-      const task = loop.enqueueTask(question, { maxSteps: effort === 'Baixo' ? 6 : effort === 'Médio' ? 10 : 14, maxRetries: effort === 'Baixo' ? 1 : 2 });
+      const effortBudgets = { Baixo: { maxSteps: 8, maxToolCalls: 14, maxModelCalls: 12 }, Médio: { maxSteps: 16, maxToolCalls: 30, maxModelCalls: 24 }, Alto: { maxSteps: 32, maxToolCalls: 64, maxModelCalls: 50 }, 'Extra alto': { maxSteps: 50, maxToolCalls: 100, maxModelCalls: 78 } };
+      const task = loop.enqueueTask(question, { ...(effortBudgets[effort] || effortBudgets.Médio), maxRetries: effort === 'Baixo' ? 1 : 2 });
       return { kind: 'task', route: 'agent', task, model: 'Nexo Core', context: decision.context };
     }
 
@@ -111,7 +111,7 @@ export function createNexoRuntime({ config, memory, rag, ollama, research, loop,
     }
     content = content.trim(); if (!content) throw new Error('O modelo não produziu uma resposta.');
     if (prepared.question.length + content.length >= 120) await memory.remember(`Usuário: ${prepared.question}\nNexo: ${content.slice(0, 4_000)}`, { kind: /\b(?:prefiro|gosto|sempre|nunca|lembre)\b/i.test(prepared.question) ? 'user' : 'episodic', importance: 0.58, confidence: 0.68, source: 'runtime-v4' });
-    await eventBus?.publish('runtime.completed', { route: prepared.route, model: prepared.model, metrics, context: prepared.contextStats }, { source: 'nexo-runtime-v4' });
+    await eventBus?.publish('runtime.completed', { route: prepared.route, model: prepared.model, metrics, context: prepared.contextStats }, { source: 'nexo-runtime-v5' });
     yield { type: 'done', content, metrics, route: prepared.route, model: prepared.modelLabel, context: prepared.contextStats };
   }
 
@@ -121,7 +121,7 @@ export function createNexoRuntime({ config, memory, rag, ollama, research, loop,
       const capable = ['Alto', 'Extra alto'].includes(effort);
       return ollama.warm(capable ? config.capableModel : config.fastModel, capable ? effort === 'Extra alto' ? 6_144 : 4_096 : 2_048);
     },
-    health() { return { version: '4.2.0', routes: ['instant', 'fast', 'deep', 'agent'], progressiveContext: true, adaptiveModelRouting: Boolean(router), complexityEstimator: Boolean(estimator), responseIntelligence: Boolean(responseIntelligence), epistemicStates: ['KNOWN', 'INFERRED', 'RETRIEVED', 'UNCERTAIN', 'UNKNOWN'], streaming: true, cacheEntries: cache.size(), personality: personality.health() }; },
+    health() { return { version: '5.0.0', routes: ['instant', 'fast', 'deep', 'agent'], progressiveContext: true, adaptiveModelRouting: Boolean(router), complexityEstimator: Boolean(estimator), responseIntelligence: Boolean(responseIntelligence), epistemicStates: ['KNOWN', 'INFERRED', 'RETRIEVED', 'UNCERTAIN', 'UNKNOWN'], streaming: true, autonomousBudgets: true, cacheEntries: cache.size(), personality: personality.health() }; },
     clearCache() { cache.clear(); },
   };
 }
