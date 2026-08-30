@@ -51,7 +51,7 @@ test('Runtime carrega contexto progressivamente e usa o modelo capaz em DEEP', a
     personality: { observe() {}, prompt() { return 'tom natural'; }, health() { return { adaptive: true }; } },
   });
   const fast = await runtime.prepare({ question: 'iai', history: [], effort: 'Médio' });
-  assert.equal(fast.route, 'fast'); assert.equal(fast.model, 'fast:3b'); assert.deepEqual(calls, { memory: 0, rag: 0, research: 0 });
+  assert.equal(fast.route, 'fast'); assert.equal(fast.model, 'fast:3b'); assert.equal(fast.options.stop.includes('Como posso'), true); assert.deepEqual(calls, { memory: 0, rag: 0, research: 0 });
   const memoryAnswer = await runtime.prepare({ question: 'qual é o meu projeto de medicina?', history: [], effort: 'Médio' });
   assert.equal(memoryAnswer.route, 'fast'); assert.equal(memoryAnswer.model, 'fast:3b'); assert.equal(calls.memory, 1); assert.equal(calls.rag, 0);
   assert.equal(memoryAnswer.contextStats.contextChars > 0, true);

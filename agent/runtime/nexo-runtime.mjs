@@ -89,7 +89,7 @@ export function createNexoRuntime({ config, memory, rag, ollama, research, loop,
     return {
       kind: 'model', route: decision.route, context: decision.context, reason: decision.reason, question, mode, effort, profile,
       model: selectedModel, modelLabel: `${decision.route === 'fast' ? 'Nexo Fast' : 'Nexo Deep'} · ${selectedModel.includes(':3b') ? 'Qwen 3B' : 'Qwen 7B'}`,
-      messages, options: { temperature: mode === 'Imagens' || mode === 'Planilhas' ? 0.16 : decision.route === 'fast' ? 0.3 : 0.24, numPredict: predict, numContext: decision.route === 'fast' ? 2_048 : effort === 'Extra alto' ? 6_144 : 4_096 },
+      messages, options: { temperature: mode === 'Imagens' || mode === 'Planilhas' ? 0.16 : decision.route === 'fast' ? 0.3 : 0.24, numPredict: predict, numContext: decision.route === 'fast' ? 2_048 : effort === 'Extra alto' ? 6_144 : 4_096, stop: decision.reason === 'presença-casual' ? ['Como posso', 'O que posso', 'E você'] : [] },
       contextStats: { historyMessages: history.length, contextChars: contextText.length, memoryLoaded: decision.needs.memory, ragLoaded: decision.needs.rag, researchLoaded: decision.needs.research, cacheHits },
     };
   }

@@ -36,7 +36,7 @@ export function createOllamaClient(config) {
         return parseJson(data.message?.content);
       } finally { clearTimeout(timer); }
     },
-    async *stream({ model, messages, temperature = 0.28, numPredict = 600, numContext = 4096, timeoutMs = 120_000, signal = null }) {
+    async *stream({ model, messages, temperature = 0.28, numPredict = 600, numContext = 4096, stop = [], timeoutMs = 120_000, signal = null }) {
       const controller = new AbortController(); const abort = () => controller.abort();
       if (signal?.aborted) controller.abort(); else signal?.addEventListener?.('abort', abort, { once: true });
       const timer = setTimeout(() => controller.abort(), timeoutMs);
@@ -45,7 +45,7 @@ export function createOllamaClient(config) {
           method: 'POST', headers: { 'Content-Type': 'application/json' }, signal: controller.signal,
           body: JSON.stringify({
             model, stream: true, keep_alive: '30m',
-            options: { temperature, top_p: 0.9, repeat_penalty: 1.1, num_ctx: numContext, num_predict: numPredict },
+            options: { temperature, top_p: 0.9, repeat_penalty: 1.1, num_ctx: numContext, num_predict: numPredict, ...(stop.length ? { stop } : {}) },
             messages,
           }),
         });
