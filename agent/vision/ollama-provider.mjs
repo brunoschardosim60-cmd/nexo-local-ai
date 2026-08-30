@@ -25,11 +25,29 @@ export function createOllamaVisionProvider({ config, filesystem, fetchImpl = glo
     }
     throw new Error('Imagem ausente.');
   }
+  async function unloadCompetingModels() {
+    try {
+      const response = await fetchImpl(`${config.ollamaUrl}/api/ps`, { signal: AbortSignal.timeout(5_000) });
+      if (!response.ok) return;
+      const models = (await response.json()).models || [];
+      for (const item of models) {
+        const model = item.name || item.model;
+        if (!model || model === config.visionModel || String(model).startsWith(`${config.visionModel}:`)) continue;
+        await fetchImpl(`${config.ollamaUrl}/api/generate`, {
+          method: 'POST', headers: { 'content-type': 'application/json' }, signal: AbortSignal.timeout(10_000),
+          body: JSON.stringify({ model, prompt: '', stream: false, keep_alive: 0 }),
+        }).catch(() => undefined);
+      }
+    } catch {
+      // A análise ainda pode funcionar quando o provider não expõe /api/ps.
+    }
+  }
   async function chat(images, prompt, { json = false, numPredict = 900 } = {}) {
     const availability = state.available == null ? await probe() : state;
     if (!availability.available) throw new Error(`Vision indisponível: ${availability.error}`);
+    await unloadCompetingModels();
     const encoded = await Promise.all(images.map(imageBase64)); const startedAt = performance.now();
-    const response = await fetchImpl(`${config.ollamaUrl}/api/chat`, { method: 'POST', headers: { 'content-type': 'application/json' }, signal: AbortSignal.timeout(120_000), body: JSON.stringify({ model: config.visionModel, stream: false, ...(json ? { format: 'json' } : {}), keep_alive: '45s', options: { temperature: 0.1, num_predict: numPredict, num_ctx: 4096 }, messages: [{ role: 'user', content: prompt, images: encoded }] }) });
+    const response = await fetchImpl(`${config.ollamaUrl}/api/chat`, { method: 'POST', headers: { 'content-type': 'application/json' }, signal: AbortSignal.timeout(120_000), body: JSON.stringify({ model: config.visionModel, stream: false, ...(json ? { format: 'json' } : {}), keep_alive: '45s', options: { temperature: 0.1, num_predict: numPredict, num_ctx: 2048 }, messages: [{ role: 'user', content: prompt, images: encoded }] }) });
     if (!response.ok) throw new Error(`Vision respondeu ${response.status}.`); const payload = await response.json(); const content = String(payload.message?.content || '').trim();
     if (!content) throw new Error('Vision não produziu análise.');
     if (!json) return { content, model: config.visionModel, provider: 'ollama-local', durationMs: performance.now() - startedAt };
@@ -37,11 +55,11 @@ export function createOllamaVisionProvider({ config, filesystem, fetchImpl = glo
   }
   return {
     id: 'ollama-vision', capabilities: ['analyzeImage', 'compareImages', 'describeImage', 'extractVisualInformation', 'evaluateGeneration'], probe,
-    analyzeImage(image, instruction = 'Analise esta imagem com precisão. Separe observações visíveis de inferências e informe incertezas.') { return chat([image], instruction); },
-    describeImage(image) { return chat([image], 'Descreva objetivamente tudo que é visível nesta imagem em português brasileiro. Não invente detalhes ocultos.'); },
-    extractVisualInformation(image, schema = {}) { return chat([image], `Extraia informação visual segundo este schema e responda apenas JSON: ${JSON.stringify(schema).slice(0, 4000)}`, { json: true }); },
-    compareImages(left, right, criteria = []) { return chat([left, right], `Compare a primeira e a segunda imagem. Critérios: ${criteria.join(', ') || 'conteúdo, composição, texto, identidade e diferenças'}. Separe semelhanças, mudanças e incertezas.`); },
-    evaluateGeneration(image, prompt, criteria = []) { return chat([image], `Avalie a imagem contra o prompt: ${prompt}. Critérios: ${criteria.join(', ') || 'aderência, composição, artefatos, anatomia, texto e restrições'}. Responda JSON {"verdict":"PASS|FAIL|UNCERTAIN","scores":{"adherence":0,"composition":0,"artifacts":0,"text":0},"evidence":[],"problems":[]}.`, { json: true }); },
+    analyzeImage(image, instruction = 'Analise esta imagem com precisão. Separe observações visíveis de inferências e informe incertezas.') { return chat([image], instruction, { numPredict: 220 }); },
+    describeImage(image) { return chat([image], 'Descreva objetivamente tudo que é visível nesta imagem em português brasileiro. Não invente detalhes ocultos.', { numPredict: 420 }); },
+    extractVisualInformation(image, schema = {}) { return chat([image], `Extraia informação visual segundo este schema e responda apenas JSON: ${JSON.stringify(schema).slice(0, 4000)}`, { json: true, numPredict: 600 }); },
+    compareImages(left, right, criteria = []) { return chat([left, right], `Compare a primeira e a segunda imagem. Critérios: ${criteria.join(', ') || 'conteúdo, composição, texto, identidade e diferenças'}. Separe semelhanças, mudanças e incertezas.`, { numPredict: 600 }); },
+    evaluateGeneration(image, prompt, criteria = []) { return chat([image], `Avalie a imagem contra o prompt: ${prompt}. Critérios: ${criteria.join(', ') || 'aderência, composição, artefatos, anatomia, texto e restrições'}. Responda JSON {"verdict":"PASS|FAIL|UNCERTAIN","scores":{"adherence":0,"composition":0,"artifacts":0,"text":0},"evidence":[],"problems":[]}.`, { json: true, numPredict: 600 }); },
     health: () => ({ provider: 'Ollama local', model: config.visionModel, ...state, capabilities: ['analyze', 'compare', 'describe', 'extract', 'evaluate'] }),
   };
 }

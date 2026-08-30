@@ -26,7 +26,7 @@ test('estado epistêmico e erros classificam incerteza e recuperação', () => {
 test('provider de visão envia imagem ao Ollama sem chamar nuvem', async () => {
   const calls = []; const fetchImpl = async (url, options = {}) => { calls.push({ url, options }); if (url.endsWith('/api/tags')) return { ok: true, json: async () => ({ models: [{ name: 'qwen2.5vl:3b' }] }) }; return { ok: true, json: async () => ({ message: { content: 'Um quadrado branco.' } }) }; };
   const provider = createOllamaVisionProvider({ config: { ollamaUrl: 'http://127.0.0.1:11434', visionModel: 'qwen2.5vl:3b' }, filesystem: { safePath: value => value }, fetchImpl });
-  const output = await provider.describeImage({ dataUrl: 'data:image/png;base64,AA==' }); assert.match(output.content, /quadrado/); assert.equal(JSON.parse(calls[1].options.body).messages[0].images.length, 1); assert.ok(calls.every(call => call.url.startsWith('http://127.0.0.1:11434')));
+  const output = await provider.describeImage({ dataUrl: 'data:image/png;base64,AA==' }); const chatCall = calls.find(call => call.url.endsWith('/api/chat')); assert.match(output.content, /quadrado/); assert.equal(JSON.parse(chatCall.options.body).messages[0].images.length, 1); assert.ok(calls.every(call => call.url.startsWith('http://127.0.0.1:11434')));
 });
 
 test('geração de imagem persiste artefato e registra verificação', async () => {

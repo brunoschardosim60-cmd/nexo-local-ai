@@ -1,5 +1,5 @@
 import { spawn } from 'node:child_process';
-import { resolve, sep } from 'node:path';
+import { dirname, join, resolve, sep } from 'node:path';
 
 const ALLOWED = {
   git: new Set(['status', 'diff', 'log', 'show', 'branch', 'blame', 'add', 'switch', 'commit']),
@@ -38,7 +38,11 @@ export function createSandbox({ workspace, timeoutMs = 120_000, maxOutput = 24_0
   return {
     async run({ command, args = [], cwd = '.', timeout = timeoutMs }, context = {}) {
       const base = validateCommand(command, args);
-      const executable = process.platform === 'win32' && ['npm', 'npx'].includes(base) ? `${base}.cmd` : base;
+      const npmCli = process.platform === 'win32' && ['npm', 'npx'].includes(base)
+        ? join(dirname(process.execPath), 'node_modules', 'npm', 'bin', base === 'npm' ? 'npm-cli.js' : 'npx-cli.js')
+        : null;
+      const executable = npmCli ? process.execPath : base;
+      const executableArgs = npmCli ? [npmCli, ...args.map(String)] : args.map(String);
       const workingDirectory = safeCwd(workspace, cwd);
       const safeEnv = {
         PATH: process.env.PATH, SystemRoot: process.env.SystemRoot, TEMP: process.env.TEMP, TMP: process.env.TMP,
@@ -47,7 +51,7 @@ export function createSandbox({ workspace, timeoutMs = 120_000, maxOutput = 24_0
       };
       return new Promise((resolvePromise, reject) => {
         const startedAt = performance.now(); let stdout = ''; let stderr = ''; let timedOut = false;
-        const child = spawn(executable, args.map(String), { cwd: workingDirectory, env: safeEnv, shell: false, windowsHide: true });
+        const child = spawn(executable, executableArgs, { cwd: workingDirectory, env: safeEnv, shell: false, windowsHide: true });
         const abort = () => child.kill('SIGTERM');
         if (context.signal?.aborted) abort(); else context.signal?.addEventListener('abort', abort, { once: true });
         const timer = setTimeout(() => { timedOut = true; child.kill('SIGTERM'); }, Math.min(timeout, timeoutMs));

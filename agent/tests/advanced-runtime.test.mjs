@@ -9,7 +9,8 @@ import { createBrowserAgent, pngSize } from '../browser/browser-agent.mjs';
 import { createEventBus } from '../events/event-bus.mjs';
 import { createMcpManager } from '../mcp/client.mjs';
 import { createDatabase } from '../memory/database.mjs';
-import { assertSafeUrl, createResearchAgent } from '../research/research-agent.mjs';
+import { createPlanner } from '../orchestrator/planner.mjs';
+import { assertSafeUrl, createResearchAgent, normalizeSearchQuery } from '../research/research-agent.mjs';
 import { permissionPolicy } from '../safety/policies.mjs';
 import { createSkillEngine } from '../skills/skill-engine.mjs';
 import { createMultiAgentCoordinator } from '../specialists/coordinator.mjs';
@@ -24,6 +25,34 @@ test('Research Agent normaliza fontes e bloqueia SSRF', async () => {
   assert.ok(investigation.queries.length >= 2); assert.ok(investigation.evidence.length >= 1); assert.equal(investigation.sourceCoverage.wikipedia >= 1, true);
   await assert.rejects(() => assertSafeUrl('http://127.0.0.1/admin'), /privados|localhost/);
   await assert.rejects(() => assertSafeUrl('file:///etc/passwd'), /HTTP/);
+});
+
+test('Research Agent reduz instruções à consulta e remove resultados irrelevantes', async () => {
+  assert.equal(normalizeSearchQuery('Pesquise em fontes públicas o que é WebAssembly e dê dois usos práticos, citando fontes'), 'WebAssembly');
+  const fetchImpl = async (url) => {
+    assert.match(String(url), /WebAssembly/);
+    return new Response(JSON.stringify({ query: { search: [
+      { title: 'Ambientalismo', snippet: 'movimento ambiental' },
+      { title: 'WebAssembly', snippet: 'formato binário para uma máquina virtual baseada em pilha' },
+    ] } }), { status: 200, headers: { 'content-type': 'application/json' } });
+  };
+  const result = await createResearchAgent({ fetchImpl }).search({ query: 'Pesquise em fontes públicas o que é WebAssembly e dê dois usos práticos, citando fontes', sources: ['wikipedia'], limit: 3 });
+  assert.deepEqual(result.results.map(item => item.title), ['WebAssembly']);
+});
+
+test('Planner usa falha e busca anteriores sem chamar modelo para decisões óbvias', async () => {
+  let modelCalls = 0;
+  const planner = createPlanner({
+    ollama: { async json() { modelCalls += 1; throw new Error('não deveria chamar'); } },
+    router: { route: () => ({ model: 'slow', analysis: { difficulty: { level: 'high' } } }) },
+  });
+  const task = { objective: 'Trabalhe exclusivamente no diretório fixture-app. Encontre e corrija o bug dos testes.' };
+  const tools = [{ name: 'filesystem.search' }, { name: 'filesystem.read' }];
+  const located = await planner.selectAction({ task, step: { title: 'Localizar a causa', description: 'pesquisar o símbolo' }, tools, runs: [{ tool: 'code.validate', output: { results: [{ stdout: '✖ sum (1ms)\n-1 !== 5', stderr: '' }] } }] });
+  assert.deepEqual(located.input, { query: 'sum', path: 'fixture-app', maxResults: 30 });
+  const read = await planner.selectAction({ task, step: { title: 'Ler o arquivo responsável', description: 'abrir implementação' }, tools, runs: [{ tool: 'filesystem.search', output: [{ path: 'fixture-app/test/math.test.js' }, { path: 'fixture-app/src/math.js' }] }] });
+  assert.deepEqual(read.input, { path: 'fixture-app/src/math.js' });
+  assert.equal(modelCalls, 0);
 });
 
 test('Skills locais são descobertas, recuperadas e desativadas persistentemente', async () => {

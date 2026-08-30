@@ -66,6 +66,9 @@ test('executor local bloqueia escapes de caminho e processadores externos', asyn
     await assert.rejects(sandbox.run({ command: 'rg', args: ['--pre=cmd', 'segredo', '.'] }), /Opção não permitida/);
     await assert.rejects(sandbox.run({ command: 'rg', args: ['segredo', '../fora'] }), /travessia/);
     await assert.rejects(sandbox.run({ command: 'node', args: ['--check', 'C:\\Windows\\System32\\drivers\\etc\\hosts'] }), /absolutos/);
+    await writeFile(join(directory, 'package.json'), JSON.stringify({ private: true, scripts: { test: 'node --test' } }), 'utf8');
+    const npmTest = await sandbox.run({ command: 'npm', args: ['test'] });
+    assert.equal(npmTest.exitCode, 0);
   } finally { await rm(directory, { recursive: true, force: true }); }
 });
 

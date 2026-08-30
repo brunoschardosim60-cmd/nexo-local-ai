@@ -19,6 +19,10 @@ function words(value) {
   );
 }
 
+function explicitWorkspaceScope(value = '') {
+  return String(value).match(/\b(?:diret[oó]rio|pasta)\s+[`"']?([a-z0-9._/-]{2,300})[`"']?/i)?.[1]?.replace(/[.,;:]+$/, '') || null;
+}
+
 function relevantDocuments(question, documents = [], limit = 4) {
   const query = words(question);
   return documents
@@ -43,6 +47,29 @@ function modeInstruction(mode) {
   if (mode === 'Imagens')
     return 'A geração visual pertence ao Nexo Media. Nunca apresente texto ou SVG como se fosse uma imagem raster gerada.';
   return '';
+}
+
+function normalizeSpreadsheetCsv(content) {
+  const raw = String(content || '').trim();
+  const fenced = raw.match(/```(?:csv)?\s*([\s\S]*?)```/i)?.[1]?.trim();
+  const candidate = fenced || raw;
+  const lines = candidate.split(/\r?\n/).map(line => line.trim()).filter(Boolean);
+  const tabular = lines.filter(line => line.includes(';') || (line.match(/,/g) || []).length >= 2);
+  if (tabular.length < 2) return raw;
+  return tabular.map(line => line.includes(';') ? line : line.replace(/,/g, ';')).join('\n');
+}
+
+function groundResearchCitations(content, sources = []) {
+  if (!sources.length) return content;
+  const allowed = new Set(sources.map(item => String(item.url || '').trim()).filter(Boolean));
+  let grounded = String(content || '')
+    .split(/\r?\n/)
+    .filter(line => !/^\s*(?:[*_]{1,2})?(?:fonte|source|refer[eê]ncia|link)(?:[*_]{1,2})?\s*:/iu.test(line))
+    .join('\n')
+    .replace(/\[([^\]]+)\]\((https?:\/\/[^)]+)\)/gi, (match, label, url) => allowed.has(url.trim()) ? match : label);
+  grounded = grounded.replace(/https?:\/\/[^\s)\]]+/gi, url => allowed.has(url.replace(/[.,;:]+$/, '')) ? url : '');
+  const citations = sources.slice(0, 5).map(item => `- [${String(item.title || item.source || 'Fonte').replaceAll('[', '').replaceAll(']', '')}](${item.url})`).join('\n');
+  return `${grounded.trim()}\n\n### Fontes consultadas\n\n${citations}`;
 }
 
 function cacheStore(maxEntries = 120) {
@@ -85,12 +112,13 @@ function socialPresenceFallback(prepared) {
     return presenceVariants[Number(prepared.conversationState?.turnCount || 1) % presenceVariants.length];
   }
   const greeting = raw.split(/\s+(?:bb|beb[eê]|nexo|mano|cara)\s*$/iu)[0].slice(0, 32) || 'oi';
-  const name = prepared.conversationState?.userName ? `, ${prepared.conversationState.userName}` : '';
+  const userName = prepared.conversationState?.userName ? String(prepared.conversationState.userName) : '';
+  const name = userName ? `, ${userName}` : '';
   const repeated = Number(prepared.conversationState?.greetingCount || 0) > 1;
   const variants = repeated
     ? [
         `${greeting} de novo kkk${name}. Tô contigo — surgiu alguma ideia ou você só veio dar mais um oi?`,
-        `${greeting} outra vez 😄${name ? ` ${name},` : ''} gostei da insistência. O que tá passando pela tua cabeça?`,
+        `${greeting} outra vez 😄${userName ? ` ${userName},` : ''} gostei da insistência. O que tá passando pela tua cabeça?`,
         `Voltei o cumprimento: ${greeting} 😄 Tô curioso — aconteceu alguma coisa ou vamos inventar assunto juntos?`,
       ]
     : [
@@ -214,6 +242,14 @@ export function createNexoRuntime({
         model: 'Nexo SelfModel',
         capabilityState: conversationTurn.operationalCapabilities,
         epistemic: assessKnowledge({ direct: true }),
+      };
+    }
+    if (earlyDecision.reason === 'presença-casual') {
+      const content = socialPresenceFallback({ question, conversationState: conversationTurn?.state || null });
+      conversation?.completeTurn?.({ sessionId, content, profile, historyLength: Array.isArray(input.history) ? input.history.length : 0 });
+      return {
+        kind: 'instant', route: 'fast', content, model: 'Nexo Social', context: earlyDecision.context,
+        conversationState: conversationTurn?.state || null, epistemic: assessKnowledge({ direct: true }),
       };
     }
     if (
@@ -426,6 +462,7 @@ export function createNexoRuntime({
       const task = loop.enqueueTask(question, {
         ...(effortBudgets[effort] || effortBudgets.Médio),
         maxRetries: effort === 'Baixo' ? 1 : 2,
+        ...(explicitWorkspaceScope(question) ? { scopes: [explicitWorkspaceScope(question)] } : {}),
       });
       return {
         kind: 'task',
@@ -438,6 +475,8 @@ export function createNexoRuntime({
 
     const cacheHits = [];
     const contextParts = [];
+    let researchSources = [];
+    let memoryResults = [];
     if (
       personal &&
       /\b(objetivo|meta|prazo|pendente|prioridade|projeto|terminar|esta semana|hoje|retomar|estudar|aprender)\b/i.test(
@@ -462,6 +501,18 @@ export function createNexoRuntime({
           }),
       );
       cacheHits.push({ source: 'memory', cached: found.cached });
+      memoryResults = found.value;
+      const directMemory = memoryResults[0];
+      const directRecall = /^(?:qual|quem|quando|onde)\b/i.test(question.trim())
+        && directMemory?.source === 'USER_EXPLICIT'
+        && directMemory.confidence >= 0.85
+        && (directMemory.semanticScore >= 0.72 || directMemory.retrieval?.scoreParts?.lexical >= 0.12);
+      if (directRecall) {
+        return {
+          kind: 'instant', route: 'memory', content: directMemory.content, model: 'Nexo Memory',
+          memoryId: directMemory.id, epistemic: assessKnowledge({ retrieved: [directMemory], confidence: directMemory.confidence }),
+        };
+      }
       if (found.value.length)
         contextParts.push(
           `MEMÓRIA LOCAL RELEVANTE:\n${found.value.map((item) => `- ${item.content.slice(0, 900)}`).join('\n')}`,
@@ -494,9 +545,17 @@ export function createNexoRuntime({
         }),
       );
       cacheHits.push({ source: 'research', cached: found.cached });
+      researchSources = found.value.results.slice(0, 8).map(item => ({ title: item.title, url: item.url, source: item.source }));
+      if (!found.value.results.length) {
+        return {
+          kind: 'instant', route: 'research', model: 'Nexo Research',
+          content: `Não encontrei fontes públicas relevantes o bastante para responder com segurança.${found.value.errors?.length ? ` Falhas dos provedores: ${found.value.errors.map(item => `${item.source}: ${item.error}`).join('; ')}` : ''}`,
+          epistemic: assessKnowledge({ retrieved: [], evidence: [], confidence: 0.1 }),
+        };
+      }
       if (found.value.results.length)
         contextParts.push(
-          `PESQUISA ONLINE:\n${found.value.results
+          `PESQUISA ONLINE (use somente estas fontes e copie as URLs exatamente; não invente links):\n${found.value.results
             .slice(0, 8)
             .map(
               (item) =>
@@ -637,6 +696,7 @@ export function createNexoRuntime({
       complexity,
       epistemic,
       personalMode,
+      researchSources,
       answerPlan: responseLayer?.plan || null,
       contextStats: {
         historyMessages: history.length,
@@ -727,6 +787,8 @@ export function createNexoRuntime({
       }
     }
     content = normalizePortugueseOutput(content);
+    if (prepared.mode === 'Planilhas') content = normalizeSpreadsheetCsv(content);
+    if (prepared.researchSources?.length) content = groundResearchCitations(content, prepared.researchSources);
     if (!content) throw new Error('O modelo não produziu uma resposta.');
     quality ||= responseIntelligence?.evaluate?.(content, { context: prepared.context, state: prepared.conversationState, question: prepared.question }) || null;
     conversation?.completeTurn?.({ sessionId: prepared.sessionId, content, profile: prepared.profile, historyLength: prepared.historyLength });

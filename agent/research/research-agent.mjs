@@ -6,6 +6,33 @@ import { RISK } from '../safety/policies.mjs';
 const USER_AGENT = 'NexoLocalAI/2.0 (local research assistant)';
 const SOURCE_QUALITY = Object.freeze({ wikipedia: { authority: 0.72, kind: 'encyclopedia', caveat: 'fonte terciária editável' }, openalex: { authority: 0.88, kind: 'academic-index', caveat: 'índice e metadados não substituem leitura do estudo' }, stackoverflow: { authority: 0.66, kind: 'community-technical', caveat: 'respostas variam em data e qualidade' } });
 const PRIVATE_V4 = /^(?:10\.|127\.|169\.254\.|192\.168\.|172\.(?:1[6-9]|2\d|3[01])\.|0\.|224\.|255\.)/;
+const QUERY_STOP_WORDS = new Set(['pesquise','pesquisar','busque','buscar','procure','fontes','publicas','publicos','sobre','cite','citando','links','link','explique','mostre','liste','praticos','praticas','dois','duas','uma','para','com','que']);
+
+export function normalizeSearchQuery(value = '') {
+  const quoted = String(value).match(/["“]([^"”]{2,120})["”]/)?.[1];
+  if (quoted) return quoted.trim();
+  const focused = String(value)
+    .replace(/^\s*(?:pesquise|busque|procure)(?:\s+em)?(?:\s+fontes?\s+p[uú]blicas?)?\s*/i, '')
+    .replace(/^\s*(?:o que (?:é|e)|quem (?:é|e)|como funciona)\s+/i, '')
+    .split(/\s+e\s+(?:d[eê]|liste|mostre|explique|compare|cite)(?:\s|$)|[,;]/iu)[0]
+    .trim();
+  return focused || String(value).trim();
+}
+
+function searchTerms(value) {
+  return [...new Set(String(value).normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().match(/[a-z0-9+#.-]{3,}/g) || [])]
+    .filter(term => !QUERY_STOP_WORDS.has(term));
+}
+
+function relevance(result, query) {
+  const normalizedQuery = normalizeSearchQuery(query).normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
+  const title = String(result.title || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
+  const snippet = String(result.snippet || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
+  const terms = searchTerms(normalizedQuery);
+  let score = normalizedQuery && title.includes(normalizedQuery) ? 10 : 0;
+  for (const term of terms) score += title.includes(term) ? 3 : snippet.includes(term) ? 1 : 0;
+  return score;
+}
 
 function decodeHtml(value = '') {
   return String(value).replace(/<[^>]+>/g, ' ').replace(/&nbsp;/gi, ' ').replace(/&amp;/gi, '&').replace(/&quot;/gi, '"').replace(/&#39;|&apos;/gi, "'").replace(/&lt;/gi, '<').replace(/&gt;/gi, '>').replace(/&#(\d+);/g, (_, code) => String.fromCodePoint(Number(code))).replace(/\s+/g, ' ').trim();
@@ -60,7 +87,27 @@ async function wikipedia(fetchImpl, query, limit) {
   Object.entries({ action: 'query', format: 'json', list: 'search', srsearch: query, srlimit: String(limit), utf8: '1', origin: '*' }).forEach(([key, value]) => url.searchParams.set(key, value));
   const response = await fetchImpl(url, { signal: AbortSignal.timeout(10_000), headers: { 'User-Agent': USER_AGENT } }); if (!response.ok) throw new Error(`Wikipedia: HTTP ${response.status}`);
   const data = await response.json();
-  return (data.query?.search || []).map(item => ({ source: 'wikipedia', title: item.title, url: `https://pt.wikipedia.org/wiki/${encodeURIComponent(item.title.replace(/ /g, '_'))}`, snippet: decodeHtml(item.snippet), publishedAt: item.timestamp || null, evidence: `Wikipedia: ${decodeHtml(item.snippet)}` }));
+  const matches = data.query?.search || [];
+  const pageIds = matches.map(item => item.pageid).filter(value => Number.isInteger(value));
+  const pages = new Map();
+  if (pageIds.length) {
+    try {
+      const detailsUrl = new URL('https://pt.wikipedia.org/w/api.php');
+      Object.entries({ action: 'query', format: 'json', prop: 'extracts|info', pageids: pageIds.join('|'), exintro: '1', explaintext: '1', inprop: 'url', origin: '*' }).forEach(([key, value]) => detailsUrl.searchParams.set(key, value));
+      const detailsResponse = await fetchImpl(detailsUrl, { signal: AbortSignal.timeout(10_000), headers: { 'User-Agent': USER_AGENT } });
+      if (detailsResponse.ok) {
+        const details = await detailsResponse.json();
+        for (const page of Object.values(details.query?.pages || {})) pages.set(Number(page.pageid), page);
+      }
+    } catch {
+      // O resultado da busca continua útil caso o enriquecimento da página falhe.
+    }
+  }
+  return matches.map(item => {
+    const page = pages.get(Number(item.pageid));
+    const snippet = decodeHtml(page?.extract || item.snippet).slice(0, 3_000);
+    return { source: 'wikipedia', title: item.title, url: page?.fullurl || `https://pt.wikipedia.org/wiki/${encodeURIComponent(item.title.replace(/ /g, '_'))}`, snippet, publishedAt: item.timestamp || null, evidence: `Wikipedia: ${snippet}` };
+  });
 }
 
 async function openAlex(fetchImpl, query, limit) {
@@ -80,12 +127,17 @@ async function stackExchange(fetchImpl, query, limit) {
 export function createResearchAgent({ fetchImpl = fetch, resolveHost = lookup } = {}) {
   const providers = { wikipedia, openalex: openAlex, stackoverflow: stackExchange };
   async function search({ query, sources = Object.keys(providers), limit = 5 }) {
+    const providerQuery = normalizeSearchQuery(query);
     const selected = [...new Set(sources)].filter(source => providers[source]);
-    const settled = await Promise.allSettled(selected.map(source => providers[source](fetchImpl, query, limit)));
+    const settled = await Promise.allSettled(selected.map(source => providers[source](fetchImpl, providerQuery, limit)));
     const errors = []; const results = [];
     settled.forEach((item, index) => item.status === 'fulfilled' ? results.push(...item.value) : errors.push({ source: selected[index], error: item.reason instanceof Error ? item.reason.message : 'Falha desconhecida.' }));
-    const unique = results.filter((item, index, all) => item.url && all.findIndex(candidate => candidate.url === item.url) === index).slice(0, limit * selected.length);
-    return { query, sources: selected, results: unique, errors, researchedAt: new Date().toISOString() };
+    const unique = results.map(item => ({ ...item, relevance: relevance(item, providerQuery) }))
+      .filter(item => item.url && item.relevance > 0)
+      .filter((item, index, all) => all.findIndex(candidate => candidate.url === item.url) === index)
+      .sort((left, right) => right.relevance - left.relevance)
+      .slice(0, limit * selected.length);
+    return { query, providerQuery, sources: selected, results: unique, errors, researchedAt: new Date().toISOString() };
   }
 
   async function investigate({ question, sources = Object.keys(providers), limitPerQuery = 4 }) {

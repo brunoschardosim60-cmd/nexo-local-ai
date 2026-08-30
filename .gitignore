@@ -25,6 +25,8 @@ npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
 .pnpm-debug.log*
+.nexo-agent.stdout.log
+.nexo-agent.stderr.log
 
 # local environment
 .env*

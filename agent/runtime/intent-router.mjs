@@ -1,6 +1,7 @@
 const AGENT_PATTERNS = /(?:\b(?:corrija|implemente|altere|modifique|edite|crie|rode|execute|publique)\b[\s\S]*\b(?:projeto|repositorio|repositório|arquivo|codigo|código|site|api|servidor|testes?)\b|\b(?:analise|investigue|teste)\b[\s\S]*\b(?:meu|minha|este|esta|o nosso|a nossa)\s+(?:projeto|repositorio|repositório|arquivo|codigo|código|site|api|servidor|testes?)\b)/i;
 const DEEP_PATTERNS = /\b(?:explique em detalhes|analise|compare|pesquise|investigue|arquitetura|estrategia|estratégia|documento|planilha|programa|codigo|código|api|banco de dados)\b/i;
 const MEMORY_PATTERNS = /\b(?:lembra|lembre|memoria|memória|conversamos|eu disse|eu falei|meu|minha|meus|minhas|prefiro|gosto|costumo)\b/i;
+const REFERENTIAL_MEMORY_PATTERNS = /^(?:qual|quem|como|onde|quando|o que)\b[\s\S]*\b(?:desta|deste|desse|dessa|daquele|daquela|nosso|nossa)\b/i;
 const DOCUMENT_PATTERNS = /\b(?:arquivo|documento|anexo|pdf|docx|xlsx|csv|texto enviado|planilha)\b/i;
 const SERIOUS_PATTERNS = /\b(?:coisa séria|assunto sério|não brinca|luto|morte|morreu|doença|doenca|depress|ansiedade|suic|violência|violencia|abuso|demitid|divórcio|divorcio|hospital)\b/i;
 const SECURITY_PATTERNS = /\b(?:sql injection|injeção de sql|senha|credencial|token|segredo|vulnerabilidade|malware|ransomware|invas|hack|segurança|seguranca|firewall|vpn)\b/i;
@@ -40,7 +41,7 @@ export function instantAnswer(question, { now = new Date(), weather = null } = {
     || /(?:(?:apenas|so|somente).*(?:hora|horario)|(?:perguntei|pedi|quero).*(?:hora|horario)|(?:hora|horario).*(?:apenas|so|somente))/.test(normalized);
   if (asksTime) return `Agora são **${clock}**.`;
   if (/(data de hoje|que dia e hoje|qual.*data|dia de hoje)/.test(normalized)) return `Hoje é **${date}**.`;
-  if (/^(?:qual (?:e|é) )?(?:a )?(?:temperatura|clima|tempo)(?: agora| hoje)?$/.test(normalized) && weather) {
+  if (/^(?:qual (?:e )?)?(?:(?:a|o) )?(?:temperatura|clima|tempo)(?: agora| hoje)?$/.test(normalized) && weather) {
     return `Agora está **${weather.temperature}°C** em ${weather.label}${weather.description ? `, com ${String(weather.description).toLowerCase()}` : ''}.`;
   }
   return null;
@@ -50,7 +51,7 @@ export function routeIntent({ question, mode = 'Geral', effort = 'Médio', hasDo
   const immediate = instantAnswer(question, { now, weather });
   const context = classifyConversationContext(question);
   const presence = /^(?:(?:o+i+e*|ol+a+|i+a+i+|e+a+e+|e+ ai+|opa+)(?:\s+(?:nexo|bb|bebe|mano|cara))?|(?:nexo[,]?\s*)?(?:esta|voce esta) por ai)$/.test(normalizeIntent(question));
-  if (mode === 'Agente' || AGENT_PATTERNS.test(question)) {
+  if (mode === 'Agente' || (mode === 'Geral' && AGENT_PATTERNS.test(question))) {
     return { route: 'agent', context, reason: mode === 'Agente' ? 'modo-agente' : 'ação-local-complexa', needs: { memory: true, rag: hasDocuments || DOCUMENT_PATTERNS.test(question), research: webSearch } };
   }
   if (immediate) return { route: 'instant', context, reason: 'resposta-determinística', answer: immediate, needs: { memory: false, rag: false, research: false } };
@@ -58,7 +59,7 @@ export function routeIntent({ question, mode = 'Geral', effort = 'Médio', hasDo
   const deep = forcedDeep || webSearch || hasDocuments || ['Programar', 'Imagens', 'Planilhas'].includes(mode) || question.length > 420 || DEEP_PATTERNS.test(question);
   return {
     route: deep ? 'deep' : 'fast', context, reason: deep ? forcedDeep ? 'esforço-selecionado' : 'contexto-complexo' : presence ? 'presença-casual' : 'conversa-leve',
-    needs: { memory: MEMORY_PATTERNS.test(question), rag: hasDocuments || DOCUMENT_PATTERNS.test(question), research: webSearch },
+    needs: { memory: MEMORY_PATTERNS.test(question) || REFERENTIAL_MEMORY_PATTERNS.test(normalizeIntent(question)), rag: hasDocuments || DOCUMENT_PATTERNS.test(question), research: webSearch },
   };
 }
 

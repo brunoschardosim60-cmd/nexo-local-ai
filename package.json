@@ -26,6 +26,7 @@
     "eval:conversation-live": "node agent/evals/conversation-v10-live.mjs",
     "eval:conversation-manual": "node agent/evals/conversation-v10-manual-review.mjs",
     "eval:self-capabilities": "node agent/evals/capability-self-live.mjs",
+    "eval:full-live": "node agent/evals/full-capabilities-live.mjs",
     "benchmark:conversation": "node agent/evals/conversation-model-benchmark.mjs",
     "eval:master": "node agent/evals/master-golden-eval.mjs",
     "benchmark:memory": "node agent/evals/memory-v6-eval.mjs performance",

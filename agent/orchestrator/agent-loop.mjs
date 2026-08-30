@@ -11,7 +11,15 @@ export function createAgentLoop({ config, database, registry, permissionManager,
   const contexts = contextEngine || { build: async ({ objective }) => { const [memories, documents] = await Promise.all([memory.search(objective, { limit: 6 }), rag.search(objective, 8)]); return { memories, documents, repository: null, trusted: [], untrusted: [], budget: {} }; } };
   const controllers = new Map();
   const specialist = id => specialistRegistry?.get?.(id) || { id: id || 'general', toolNamespaces: [] };
-  const toolsFor = (objective, agent) => registry.discover?.({ objective, namespaces: specialist(agent).toolNamespaces, limit: agent === 'general' ? 20 : 16 }) || registry.describe();
+  const toolsFor = (objective, agent) => {
+    const discovered = registry.discover?.({ objective, namespaces: specialist(agent).toolNamespaces, limit: agent === 'general' ? 20 : 16 }) || registry.describe();
+    if (agent !== 'coding') return discovered;
+    const essentialNames = new Set(['repository.map', 'code.validate', 'filesystem.list', 'filesystem.search', 'filesystem.read', 'filesystem.patch', 'filesystem.write', 'git.diff']);
+    const essentials = registry.describe().filter(tool => essentialNames.has(tool.name));
+    return [...discovered, ...essentials].filter((tool, index, all) => all.findIndex(item => item.name === tool.name) === index);
+  };
+  const taskRoot = task => String(task?.workingMemory?.memoryScope || 'project:.').replace(/^project:/, '') || '.';
+  const stableJson = value => JSON.stringify(value || {}, Object.keys(value || {}).sort());
   const recordModelCall = taskId => database.incrementTaskUsage?.(taskId, { modelCalls: 1 });
   const executionContext = task => ({ allowedNamespaces: specialist(task.assignedAgent).toolNamespaces, capabilityManager, capabilityId: task.capabilityId, agent: task.assignedAgent, signal: controllers.get(task.id)?.signal });
 
@@ -49,7 +57,7 @@ export function createAgentLoop({ config, database, registry, permissionManager,
     try {
       let task = database.getTask(taskId); if (!task) throw new Error('Tarefa não encontrada.');
       if (task.plan.length) return run(taskId);
-      const context = await contexts.build({ objective: task.objective, task, events: database.getEvents(taskId), runs: database.getToolRuns(taskId) });
+      const context = await contexts.build({ objective: task.objective, task, events: database.getEvents(taskId), runs: database.getToolRuns(taskId), root: taskRoot(task) });
       recordModelCall(taskId);
       const plan = await planner.createPlan({ objective: task.objective, preferredSpecialist: task.assignedAgent, tools: toolsFor(task.objective, task.assignedAgent), memories: context.memories, documents: context.documents, context, signal: controllers.get(taskId)?.signal });
       task = database.updateTask(task.id, { plan, status: 'running' }); graph.sync(task.id, plan);
@@ -131,7 +139,7 @@ export function createAgentLoop({ config, database, registry, permissionManager,
         const selections = await Promise.allSettled(readyNodes.map(async node => {
           const index = plan.findIndex(item => item.id === node.id); const candidate = plan[index];
           if (candidate.action) return { index, action: candidate.action };
-          const context = await contexts.build({ objective: `${task.objective}\n${candidate.description}`, task, events: database.getEvents(taskId), runs: database.getToolRuns(taskId) });
+          const context = await contexts.build({ objective: `${task.objective}\n${candidate.description}`, task, events: database.getEvents(taskId), runs: database.getToolRuns(taskId), root: taskRoot(task) });
           recordModelCall(taskId);
           const action = await planner.selectAction({ task: { ...task, currentStep: index }, step: candidate, tools: toolsFor(`${task.objective}\n${candidate.description}`, candidate.assignedAgent || task.assignedAgent), events: database.getEvents(taskId), runs: database.getToolRuns(taskId), memories: context.memories, documents: context.documents, context, signal: controllers.get(taskId)?.signal });
           registry.get(action.tool); return { index, action };
@@ -183,7 +191,7 @@ export function createAgentLoop({ config, database, registry, permissionManager,
       const stepIndex = task.plan.findIndex(item => item.id === readyNode.id); let step = task.plan[stepIndex];
       if (!step || stepIndex < 0) return fail(taskId, 'O grafo divergiu do plano persistido.');
       if (task.currentStep !== stepIndex) task = database.updateTask(taskId, { currentStep: stepIndex });
-      const completedRun = database.getToolRuns(taskId).filter(item => item.stepIndex === stepIndex && item.status === 'completed').at(-1);
+      const completedRun = step.action ? database.getToolRuns(taskId).filter(item => item.stepIndex === stepIndex && item.status === 'completed' && item.tool === step.action.tool && stableJson(item.input) === stableJson(step.action.input)).at(-1) : null;
       if (completedRun && step.status !== 'completed') {
         const plan = [...task.plan]; plan[stepIndex] = { ...step, status: 'completed', output: completedRun.output, observations: [...(step.observations || []), 'Recuperado de uma execução persistida.'] };
         database.updateTask(taskId, { plan, currentStep: stepIndex + 1, stepsUsed: task.stepsUsed + 1, status: 'running' }); graph.sync(taskId, plan);
@@ -194,7 +202,7 @@ export function createAgentLoop({ config, database, registry, permissionManager,
       if (!step.action) {
         database.addEvent(taskId, 'step.selecting_tool', `Selecionando ferramenta para: ${step.title}`);
         try {
-          const context = await contexts.build({ objective: `${task.objective}\n${step.description}`, task, events: database.getEvents(taskId), runs: database.getToolRuns(taskId) });
+          const context = await contexts.build({ objective: `${task.objective}\n${step.description}`, task, events: database.getEvents(taskId), runs: database.getToolRuns(taskId), root: taskRoot(task) });
           recordModelCall(taskId);
           const action = await planner.selectAction({ task, step, tools: toolsFor(`${task.objective}\n${step.description}`, step.assignedAgent || task.assignedAgent), events: database.getEvents(taskId), runs: database.getToolRuns(taskId), memories: context.memories, documents: context.documents, context, signal: controllers.get(taskId)?.signal });
           registry.get(action.tool); task = database.getTask(taskId);
@@ -241,6 +249,11 @@ export function createAgentLoop({ config, database, registry, permissionManager,
       database.mergeWorkingMemory?.(taskId, { currentOperation: tool.name, evidence: [...priorEvidence, { tool: tool.name, ok: execution.ok, step: step.title, at: new Date().toISOString() }].slice(-24), lastObservation: evaluation.reason });
       task = database.getTask(taskId);
       if (task.status === 'cancelled') { database.addEvent(taskId, 'tool.observed_after_cancel', `${tool.name} terminou após o cancelamento.`, { ok: execution.ok }, 'warn'); return snapshot(taskId); }
+      if (!evaluation.success && step.diagnostic) {
+        const plan = [...task.plan]; plan[stepIndex] = { ...plan[stepIndex], status: 'completed', output: execution.output || { error: execution.error }, attempts: execution.attempt, observations: [...(plan[stepIndex].observations || []), `Falha diagnóstica esperada: ${evaluation.reason}`], completedAt: new Date().toISOString() };
+        database.updateTask(taskId, { plan, currentStep: stepIndex + 1, stepsUsed: task.stepsUsed + 1, status: 'running' }); graph.sync(taskId, plan);
+        database.addEvent(taskId, 'step.diagnostic_observed', `${step.title}: falha preservada como evidência para investigação.`, { tool: tool.name, evaluation: evaluation.reason }, 'warn'); checkpointStore.capture(taskId, 'after-diagnostic', `Etapa ${stepIndex + 1} registrou a falha`); continue;
+      }
       if (evaluation.success) {
         const plan = [...task.plan]; plan[stepIndex] = { ...plan[stepIndex], status: 'completed', output: execution.output, attempts: execution.attempt, observations: [...(plan[stepIndex].observations || []), evaluation.reason], completedAt: new Date().toISOString() };
         database.updateTask(taskId, { plan, currentStep: stepIndex + 1, stepsUsed: task.stepsUsed + 1, status: task.status === 'paused' ? 'paused' : 'running' }); graph.sync(taskId, plan);

@@ -12,7 +12,10 @@ function observedRun(run) {
   if (['read_file', 'filesystem.read'].includes(run.tool) && output?.path) {
     return { summary: `Arquivo ${output.path} lido com sucesso.`, evidence: [`Leitura concluída: ${output.path} (${String(output.content || '').length} caracteres)`] };
   }
-  if (['write_file', 'filesystem.write', 'filesystem.patch'].includes(run.tool) && output?.path) {
+  if (run.tool === 'filesystem.patch' && output?.path) {
+    return { summary: `Patch aplicado em ${output.path}, linhas ${output.startLine}–${output.endLine}.`, evidence: [`Patch concluído: ${output.path}; hash ${output.beforeHash} → ${output.afterHash}${output.backup ? `; backup: ${output.backup}` : ''}`] };
+  }
+  if (['write_file', 'filesystem.write'].includes(run.tool) && output?.path) {
     return { summary: `Arquivo ${output.path} gravado com ${output.bytes || 0} bytes.`, evidence: [`Escrita concluída: ${output.path}${output.backup ? `; backup: ${output.backup}` : ''}`] };
   }
   if (['run_command', 'shell.run', 'git.status', 'git.diff', 'git.log', 'git.show'].includes(run.tool) && output?.command) {

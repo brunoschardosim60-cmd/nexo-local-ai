@@ -14,8 +14,10 @@ test('Intent Router separa INSTANT, FAST, DEEP e AGENT', () => {
   assert.equal(routeIntent({ question: 'que horas são?', now }).route, 'instant');
   assert.equal(routeIntent({ question: 'iai' }).route, 'fast');
   assert.equal(routeIntent({ question: 'Nexo, tá por aí?' }).reason, 'presença-casual');
+  assert.equal(routeIntent({ question: 'qual o clima agora?', weather: { label: 'São Paulo', temperature: 23 } }).route, 'instant');
   assert.equal(routeIntent({ question: 'explique em detalhes a arquitetura deste sistema' }).route, 'deep');
   assert.equal(routeIntent({ question: 'corrija os bugs do projeto e rode os testes' }).route, 'agent');
+  assert.equal(routeIntent({ question: 'crie uma função e testes', mode: 'Programar' }).route, 'deep');
 });
 
 test('histórico é limitado por mensagens e caracteres', () => {
@@ -70,7 +72,7 @@ test('Runtime carrega contexto progressivamente e usa o modelo capaz em DEEP', a
     personality: { observe() {}, prompt() { return 'tom natural'; }, health() { return { adaptive: true }; } },
   });
   const fast = await runtime.prepare({ question: 'iai', history: [], effort: 'Médio' });
-  assert.equal(fast.route, 'fast'); assert.equal(fast.model, 'fast:3b'); assert.deepEqual(fast.options.stop, []); assert.deepEqual(calls, { memory: 0, rag: 0, research: 0 });
+  assert.equal(fast.route, 'fast'); assert.equal(fast.kind, 'instant'); assert.equal(fast.model, 'Nexo Social'); assert.match(fast.content, /curioso|cabeça|ideia|contigo/i); assert.deepEqual(calls, { memory: 0, rag: 0, research: 0 });
   const memoryAnswer = await runtime.prepare({ question: 'qual é o meu projeto de medicina?', history: [], effort: 'Médio' });
   assert.equal(memoryAnswer.route, 'fast'); assert.equal(memoryAnswer.model, 'fast:3b'); assert.equal(calls.memory, 1); assert.equal(calls.rag, 0);
   assert.equal(memoryAnswer.contextStats.contextChars > 0, true);
