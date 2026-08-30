@@ -75,7 +75,7 @@ export function createNexoRuntime({ config, memory, rag, ollama, research, loop,
     }
 
     const compact = decision.route === 'fast'; const personalityPrompt = personality.prompt(decision.context, profile, { compact });
-    const fastBehavior = decision.reason === 'presença-casual' ? 'Apenas confirme presença; não simule humor nem pergunte como a pessoa está.' : '';
+    const fastBehavior = decision.reason === 'presença-casual' ? 'Se perguntarem se está aí, confirme disponibilidade em até 8 palavras.' : '';
     const current = new Intl.DateTimeFormat('pt-BR', { dateStyle: 'short', timeStyle: 'short' }).format(new Date());
     const coreSystem = compact
       ? `Você é Nexo. Fale em pt-BR correto, natural e direto; gramática impecável, sem cordialidade robótica. ${fastBehavior} ${personalityPrompt}`
