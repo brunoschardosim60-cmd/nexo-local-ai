@@ -1597,9 +1597,10 @@ export default function Home() {
         speechSuppressedRef.current = false;
       }
       const immediate = await new NexoClient(agentToken).streamChat(
-        {
-          question,
-          mode: effectiveModeV3,
+          {
+            question,
+            sessionId: baseChat.id,
+            mode: effectiveModeV3,
           effort,
           profile,
           history: baseChat.messages,

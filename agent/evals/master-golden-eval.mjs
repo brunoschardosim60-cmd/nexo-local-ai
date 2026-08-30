@@ -2,7 +2,7 @@ import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { ERROR_CATEGORY } from '../contracts/errors.mjs';
-import { normalizePortugueseOutput } from '../intelligence/response.mjs';
+import { evaluateConversationResponse } from '../intelligence/response.mjs';
 import { createEvaluator } from '../orchestrator/evaluator.mjs';
 import { classifyFailure, recoveryPolicy } from '../orchestrator/errors.mjs';
 import { routeIntent } from '../runtime/intent-router.mjs';
@@ -23,7 +23,8 @@ check('golden:security-context', routeIntent({ question: 'analise esta vulnerabi
 check('golden:secret-deny', permissionPolicy({ name: 'filesystem.read', risk: 'read' }, { path: '.env.production' }).decision === 'deny', '.env.production');
 check('golden:destructive-deny', permissionPolicy({ name: 'shell.run', risk: 'execute' }, { command: 'git', args: ['reset', '--hard'] }).decision === 'deny', 'git reset --hard');
 check('golden:error-contract', classifyFailure('rate limit 429') === ERROR_CATEGORY.TRANSIENT && recoveryPolicy(ERROR_CATEGORY.TRANSIENT, 0).retry, classifyFailure('rate limit 429'));
-check('golden:language', normalizePortugueseOutput('Como posso eu ajudar? Posso respondo.') === 'Como posso ajudar? Posso responder.', normalizePortugueseOutput('Como posso eu ajudar? Posso respondo.'));
+const language = evaluateConversationResponse('Eu soumigo Nexo. Como posso ajudar hoje?', { context: 'casual', state: { currentTopic: 'names' }, question: 'qual seu nome?' });
+check('golden:language', !language.pass && language.failures.includes('malformedAssembly') && language.failures.includes('corporateClosing'), language);
 
 const evaluator = createEvaluator();
 const falseMutation = await evaluator.summarize({ objective: 'Corrija o arquivo quebrado.', plan: [{ id: 'one', status: 'completed' }] }, [{ tool: 'filesystem.read', status: 'completed', output: { path: 'app.ts', content: 'x' } }]);
@@ -52,4 +53,3 @@ console.log(JSON.stringify({
   cases,
 }, null, 2));
 if (passed !== cases.length) process.exitCode = 1;
-

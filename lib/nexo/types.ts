@@ -208,6 +208,14 @@ export type RuntimeContextStats = {
   ragLoaded: boolean;
   researchLoaded: boolean;
   cacheHits: Array<{ source: string; cached: boolean }>;
+  promptCharacters?: number;
+  identityIncluded?: boolean;
+  workingStateFields?: string[];
+  conversationSession?: string;
+  currentReferent?: string | null;
+  aliasActive?: boolean;
+  longTermMemorySkippedByWorkingState?: boolean;
+  responseQuality?: { pass: boolean; failures: string[]; similarity: number } | null;
 };
 export type RuntimeStreamEvent =
   | {
@@ -216,7 +224,7 @@ export type RuntimeStreamEvent =
       model: string;
       context: RuntimeContextStats;
     }
-  | { type: 'token'; content: string }
+  | { type: 'token'; content: string; sequence?: number }
   | {
       type: 'done';
       content: string;

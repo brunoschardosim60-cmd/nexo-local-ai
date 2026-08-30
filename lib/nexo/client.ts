@@ -16,16 +16,21 @@ export class NexoClient {
   async createTask(objective: string, options: { maxSteps: number; maxRetries: number }) {
     return (await jsonResponse<{ task: AgentTask }>(await fetch(`${this.baseUrl}/agent/tasks`, { method: 'POST', headers: this.headers(true), body: JSON.stringify({ objective, ...options }) }))).task;
   }
-  async streamChat(input: { question: string; mode: string; effort: Effort; profile: UserProfile; history: ChatMessage[]; documents: LocalDocument[]; attachments?: LocalAttachment[]; weather?: Record<string, unknown> | null; webSearch: boolean; imageQuality?: 'FAST'|'BALANCED'|'HIGH'|'MAX' }, onEvent: (event: RuntimeStreamEvent) => void, signal?: AbortSignal) {
+  async streamChat(input: { question: string; sessionId?: string; mode: string; effort: Effort; profile: UserProfile; history: ChatMessage[]; documents: LocalDocument[]; attachments?: LocalAttachment[]; weather?: Record<string, unknown> | null; webSearch: boolean; imageQuality?: 'FAST'|'BALANCED'|'HIGH'|'MAX' }, onEvent: (event: RuntimeStreamEvent) => void, signal?: AbortSignal) {
     const response = await fetch(`${this.baseUrl}/chat`, { method: 'POST', headers: this.headers(true), body: JSON.stringify(input), signal });
     const contentType = response.headers.get('content-type') || '';
     if (contentType.includes('application/json')) return jsonResponse<RuntimeImmediateResponse>(response);
     if (!response.ok) throw new Error(`Nexo Runtime respondeu ${response.status}.`);
     if (!response.body) throw new Error('O Nexo Runtime não iniciou o streaming.');
-    const reader = response.body.getReader(); const decoder = new TextDecoder(); let buffer = '';
+    const reader = response.body.getReader(); const decoder = new TextDecoder(); let buffer = ''; let lastTokenSequence = 0;
     const emit = (line: string) => {
       if (!line.trim()) return;
-      const event = JSON.parse(line) as RuntimeStreamEvent; onEvent(event);
+      const event = JSON.parse(line) as RuntimeStreamEvent;
+      if (event.type === 'token' && event.sequence !== undefined) {
+        if (event.sequence <= lastTokenSequence) return;
+        lastTokenSequence = event.sequence;
+      }
+      onEvent(event);
       if (event.type === 'error') throw new Error(event.error);
     };
     while (true) {

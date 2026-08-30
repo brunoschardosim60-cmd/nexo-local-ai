@@ -1,11 +1,12 @@
 import { redactSecrets } from '../context/context-engine.mjs';
 import { compactHistory, routeIntent } from './intent-router.mjs';
+import { createStreamAssembler } from './stream-assembly.mjs';
 import {
   assessKnowledge,
   epistemicInstruction,
 } from '../intelligence/epistemic.mjs';
 import { inferPersonalMode } from '../personal/modes.mjs';
-import { normalizePortugueseOutput } from '../intelligence/response.mjs';
+import { normalizePortugueseOutput, sanitizeConversationDraft } from '../intelligence/response.mjs';
 
 function words(value) {
   return new Set(
@@ -64,6 +65,36 @@ function cacheStore(maxEntries = 120) {
   };
 }
 
+function groundedIdentityFallback(state = {}) {
+  const canonical = String(state.assistantCanonicalName || 'Nexo');
+  const alias = state.assistantAlias ? String(state.assistantAlias) : null;
+  return alias
+    ? `${canonical} é meu nome; ${alias} é o apelido que você escolheu.`
+    : `${canonical}.`;
+}
+
+function guardedConversationFallback(prepared, quality, content) {
+  if (quality?.failures?.some(item => ['canonicalNameMissing', 'activeAliasMissing', 'identityContradiction'].includes(item))) return groundedIdentityFallback(prepared.conversationState);
+  if (quality?.failures?.includes('templateRepetition') && /^\s*(?:o+i+e*|ol+a+|i+a+i+|e+a+e+|opa+)/iu.test(prepared.question)) {
+    const greeting = String(prepared.question).trim().split(/\s+/)[0].slice(0, 24);
+    return `${greeting} de novo 😄`;
+  }
+  if (quality?.failures?.some(item => ['genericAiDisclaimer', 'personaPreferenceDenied'].includes(item))) {
+    return `Se for pra escolher, ${prepared.conversationState?.assistantCanonicalName || 'Nexo'} combina comigo.`;
+  }
+  if (quality?.failures?.some(item => ['topicDrift', 'alternativeNameMissing', 'alternativeRoleConfusion'].includes(item)) && prepared.conversationState?.referents?.current === 'assistant.alternativeName') {
+    return `Se eu tivesse outro nome, escolheria ${prepared.selfModel?.personalityProfile?.alternativeName || 'Eco'}.`;
+  }
+  if (quality?.failures?.some(item => ['templateRepetition', 'correctionRoleConfusion'].includes(item)) && prepared.conversationUpdate?.correction) {
+    if (prepared.conversationState?.lastCorrection?.correctedField === 'userName') return `Entendi a correção: ${prepared.conversationState.userName} é o seu nome.`;
+    if (prepared.conversationState?.lastCorrection?.correctedField === 'assistantAlias') return `Entendi a correção: o apelido agora é ${prepared.conversationState.assistantAlias}.`;
+  }
+  if (quality?.failures?.includes('aliasAssignmentRoleConfusion') && prepared.conversationState?.assistantAlias) {
+    return `Fechado — ${prepared.conversationState.assistantAlias} fica como meu apelido.`;
+  }
+  return content;
+}
+
 export function createNexoRuntime({
   config,
   memory,
@@ -72,6 +103,7 @@ export function createNexoRuntime({
   research,
   loop,
   personality,
+  conversation = null,
   router = null,
   estimator = null,
   responseIntelligence = null,
@@ -102,6 +134,22 @@ export function createNexoRuntime({
       override: input.personalMode,
       settings: personalSettings,
     });
+    const earlyDecision = routeIntent({
+      question,
+      mode,
+      effort,
+      hasDocuments: documents.length > 0,
+      webSearch: Boolean(input.webSearch),
+      weather,
+    });
+    const sessionId = String(input.sessionId || 'main').slice(0, 160);
+    const conversationTurn = conversation?.observeTurn?.({
+      sessionId,
+      question,
+      history: input.history,
+      profile,
+      context: earlyDecision.context,
+    }) || null;
     if (
       /^(?:nexo[, ]+)?(?:continue|continua|retome|retoma)(?:\s+(?:de onde paramos|meu projeto|o projeto|o trabalho))?/i.test(
         question,
@@ -234,7 +282,7 @@ export function createNexoRuntime({
     const forgetMatch = question.match(
       /^(?:nexo[, ]+)?(?:esque[cç]a|apague da mem[oó]ria|n[aã]o lembre mais)(?:\s+(?:que|disso|isto))?\s*[:,-]?\s*(.+)$/i,
     );
-    if (forgetMatch?.[1]?.trim()) {
+    if (forgetMatch?.[1]?.trim() && !conversationTurn?.update?.aliasForgotten) {
       const matches = await memory.search(forgetMatch[1].trim(), {
         scope: memoryScope,
         includeGlobal: true,
@@ -260,14 +308,7 @@ export function createNexoRuntime({
         epistemic: assessKnowledge({ direct: true }),
       };
     }
-    const decision = routeIntent({
-      question,
-      mode,
-      effort,
-      hasDocuments: documents.length > 0,
-      webSearch: Boolean(input.webSearch),
-      weather,
-    });
+    const decision = earlyDecision;
     const complexity =
       estimator?.estimate?.({
         question,
@@ -341,7 +382,8 @@ export function createNexoRuntime({
         `CONTEXTO OPERACIONAL LOCAL (fatos com IDs, não personalidade):\n${JSON.stringify({ activeGoals: today.activeGoals.slice(0, 5).map((item) => ({ id: item.id, title: item.title, progress: item.progress, status: item.status, deadline: item.deadline })), pendingTasks: today.pendingTasks.slice(0, 8).map((item) => ({ id: item.id, title: item.title, status: item.status, deadline: item.deadline, priorityReason: item.priorityEvaluation.reason })), deadlines: today.importantDeadlines.slice(0, 5).map((item) => ({ id: item.id, title: item.title, risk: item.risk })), recommendedFocus: today.recommendedFocus })}`,
       );
     }
-    if (decision.needs.memory) {
+    const loadLongTermMemory = decision.needs.memory && !conversationTurn?.workingSatisfiesMemory;
+    if (loadLongTermMemory) {
       const found = await cache.get(
         `memory:${memoryScope}:${question}`,
         20_000,
@@ -409,6 +451,8 @@ export function createNexoRuntime({
       context: decision.context,
       epistemic,
       profile,
+      conversationState: conversationTurn?.state || null,
+      selfModel: conversationTurn?.self || null,
     });
     const personalityPrompt =
       responseLayer?.prompt ||
@@ -421,9 +465,10 @@ export function createNexoRuntime({
       dateStyle: 'short',
       timeStyle: 'short',
     }).format(new Date());
+    const conversationPrompt = conversationTurn?.prompt || '';
     const coreSystem = compact
-      ? `Você é Nexo. Fale em pt-BR correto, natural e direto; gramática impecável, sem cordialidade robótica. ${fastBehavior} ${epistemicInstruction(epistemic)} ${personalityPrompt}`
-      : `Você é Nexo, um assistente local pessoal competente, curioso e confiável. Responda em português brasileiro correto. Comece pela resposta útil, preserve o contexto e diferencie fatos, inferências e incertezas. Não alegue ações que não foram executadas. Nunca diga “percebi” ou “vi” sem citar internamente um evento, tool ou memória presente no contexto. ${epistemicInstruction(epistemic)} ${personalityPrompt}`;
+      ? `Você é Nexo. Fale em pt-BR correto, natural e direto; gramática impecável, sem cordialidade robótica. Preserve rigorosamente identidade, correções, apelidos e referentes fornecidos no estado. ${fastBehavior} ${epistemicInstruction(epistemic)} ${personalityPrompt}`
+      : `Você é Nexo, um assistente local pessoal competente, curioso e confiável. Responda em português brasileiro correto. Comece pela resposta útil, preserve o contexto e diferencie fatos, inferências e incertezas. Não alegue ações que não foram executadas. Nunca diga “percebi” ou “vi” sem citar internamente um evento, tool ou memória presente no contexto. Preserve rigorosamente identidade, correções, apelidos e referentes fornecidos no estado. ${epistemicInstruction(epistemic)} ${personalityPrompt}`;
     const personalPrompt = [
       profile.name ? `Usuário: ${String(profile.name).slice(0, 80)}.` : '',
       profile.instructions
@@ -452,7 +497,7 @@ export function createNexoRuntime({
     const history = compactHistory(
       input.history,
       compact
-        ? { maxMessages: 4, maxChars: 1_400 }
+        ? { maxMessages: 6, maxChars: 2_200 }
         : { maxMessages: 10, maxChars: 9_000 },
     );
     const adaptiveRoute = router?.route?.({
@@ -462,14 +507,14 @@ export function createNexoRuntime({
       attachments: input.attachments,
       webSearch: input.webSearch,
     });
-    const selectedModel = ['Alto', 'Extra alto'].includes(effort)
+    const selectedModel = ['Alto', 'Extra alto'].includes(effort) || conversationTurn?.requiresEscalation
       ? config.capableModel
       : adaptiveRoute?.model ||
         (decision.route === 'fast' ? config.fastModel : config.capableModel);
     const predict =
       decision.route === 'fast'
         ? question.length < 100
-          ? 180
+          ? ['casual', 'playful'].includes(decision.context) ? 90 : 180
           : 360
         : effort === 'Extra alto'
           ? 1_500
@@ -480,6 +525,7 @@ export function createNexoRuntime({
       { role: 'system', content: `${coreSystem}\n${personalPrompt}` },
       ...history,
       ...(contextText ? [{ role: 'system', content: contextText }] : []),
+      ...(conversationPrompt ? [{ role: 'system', content: conversationPrompt }] : []),
       { role: 'user', content: question },
     ];
     return {
@@ -492,6 +538,14 @@ export function createNexoRuntime({
       effort,
       profile,
       memoryScope,
+      sessionId,
+      historyLength: Array.isArray(input.history) ? input.history.length : 0,
+      conversationState: conversationTurn?.state || null,
+      conversationUpdate: conversationTurn?.update || null,
+      conversationPrompt,
+      responseGuard: ['casual', 'playful'].includes(decision.context) && Boolean(
+        conversationTurn?.update?.userName || conversationTurn?.update?.referent || conversationTurn?.update?.correction || conversationTurn?.update?.alias || conversationTurn?.update?.aliasForgotten || /\b(?:o que|oq)\s+(?:podemos|dá para|da pra)\b/iu.test(question) || /\b(?:gosta|curte|prefere|acha)\b[\s\S]*\b(?:nome|apelido)\b/iu.test(question) || /^\s*(?:o+i+e*|ol+a+|i+a+i+|e+a+e+|opa+)/iu.test(question),
+      ),
       model: selectedModel,
       modelLabel: `${decision.route === 'fast' ? 'Nexo Fast' : 'Nexo Deep'} · ${selectedModel.includes(':3b') ? 'Qwen 3B' : selectedModel.includes(':7b') ? 'Qwen 7B' : selectedModel}`,
       messages,
@@ -523,10 +577,17 @@ export function createNexoRuntime({
       contextStats: {
         historyMessages: history.length,
         contextChars: contextText.length,
-        memoryLoaded: decision.needs.memory,
+        memoryLoaded: loadLongTermMemory,
         ragLoaded: decision.needs.rag,
         researchLoaded: decision.needs.research,
         cacheHits,
+        promptCharacters: messages.reduce((total, item) => total + item.content.length, 0),
+        identityIncluded: Boolean(conversationTurn),
+        workingStateFields: conversationTurn ? Object.entries(conversationTurn.state).filter(([, value]) => value != null && value !== '' && (!Array.isArray(value) || value.length)).map(([key]) => key) : [],
+        conversationSession: sessionId,
+        currentReferent: conversationTurn?.state?.referents?.current || null,
+        aliasActive: Boolean(conversationTurn?.state?.assistantAlias),
+        longTermMemorySkippedByWorkingState: Boolean(decision.needs.memory && !loadLongTermMemory),
         modelRouting: adaptiveRoute
           ? {
               domain: adaptiveRoute.analysis.domain,
@@ -551,19 +612,60 @@ export function createNexoRuntime({
     };
     let content = '';
     let metrics = null;
-    for await (const event of ollama.stream({
-      model: prepared.model,
-      messages: prepared.messages,
-      ...prepared.options,
-      signal,
-    })) {
-      if (event.type === 'token') {
-        content += event.content;
-        yield event;
-      } else if (event.type === 'metrics') metrics = event.metrics;
+    let sequence = 0;
+    let quality = null;
+    if (prepared.responseGuard) {
+      const assembler = createStreamAssembler();
+      for await (const event of ollama.stream({ model: prepared.model, messages: prepared.messages, ...prepared.options, signal })) {
+        if (event.type === 'token') assembler.append(event.content);
+        else if (event.type === 'metrics') metrics = event.metrics;
+      }
+      content = assembler.value();
+      content = sanitizeConversationDraft(content, prepared.context);
+      quality = responseIntelligence?.evaluate?.(content, { context: prepared.context, state: prepared.conversationState, question: prepared.question }) || null;
+      if (quality && !quality.pass) {
+        const grounded = guardedConversationFallback(prepared, quality, content);
+        if (grounded !== content) {
+          const groundedQuality = responseIntelligence?.evaluate?.(grounded, { context: prepared.context, state: prepared.conversationState, question: prepared.question }) || quality;
+          if (groundedQuality.pass) { content = grounded; quality = groundedQuality; }
+        }
+      }
+      if (quality && !quality.pass) {
+        const lastMessage = prepared.messages.at(-1);
+        const previousResponses = prepared.conversationState?.recentResponses?.slice(-3).join(' | ') || '';
+        const discardedTerms = [...new Set(content.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().match(/[a-z0-9]{3,}/g) || [])].slice(0, 10);
+        const repairInstruction = {
+          role: 'system',
+          content: `Você é Nexo. Esta é uma revisão de saída, não uma nova conversa.\n${prepared.conversationPrompt}\nProblemas da tentativa descartada: ${quality.failures.join(', ')}.\nEscreva somente uma nova resposta curta, natural e contextual. Preserve todos os fatos do estado. Não mencione revisão. Não use atendimento corporativo, disclaimer de IA ou a mesma formulação das respostas recentes${previousResponses ? `: ${previousResponses}` : ''}.${discardedTerms.length ? ` Para forçar novidade, evite estas palavras da tentativa descartada quando não forem fatos obrigatórios: ${discardedTerms.join(', ')}.` : ''}`,
+        };
+        const repairedMessages = [repairInstruction, lastMessage];
+        const repairedAssembler = createStreamAssembler();
+        for await (const event of ollama.stream({ model: prepared.model, messages: repairedMessages, ...prepared.options, temperature: 0.78, numPredict: Math.min(prepared.options.numPredict, 70), signal })) {
+          if (event.type === 'token') repairedAssembler.append(event.content);
+          else if (event.type === 'metrics') metrics = event.metrics;
+        }
+        content = sanitizeConversationDraft(repairedAssembler.value(), prepared.context);
+        quality = responseIntelligence?.evaluate?.(content, { context: prepared.context, state: prepared.conversationState, question: prepared.question }) || quality;
+        if (quality && !quality.pass) {
+          content = guardedConversationFallback(prepared, quality, content);
+          quality = responseIntelligence?.evaluate?.(content, { context: prepared.context, state: prepared.conversationState, question: prepared.question }) || quality;
+        }
+      }
+      if (content) yield { type: 'token', content, sequence: ++sequence };
+    } else {
+      const assembler = createStreamAssembler();
+      for await (const event of ollama.stream({ model: prepared.model, messages: prepared.messages, ...prepared.options, signal })) {
+        if (event.type === 'token') {
+          const assembled = assembler.append(event.content);
+          content = assembled.value;
+          if (assembled.delta) yield { ...event, content: assembled.delta, sequence: ++sequence };
+        } else if (event.type === 'metrics') metrics = event.metrics;
+      }
     }
     content = normalizePortugueseOutput(content);
     if (!content) throw new Error('O modelo não produziu uma resposta.');
+    quality ||= responseIntelligence?.evaluate?.(content, { context: prepared.context, state: prepared.conversationState, question: prepared.question }) || null;
+    conversation?.completeTurn?.({ sessionId: prepared.sessionId, content, profile: prepared.profile, historyLength: prepared.historyLength });
     if (
       /\b(?:prefiro|gosto|sempre|nunca|meu nome|me chama|decidimos|padr[aã]o|procedimento)\b/i.test(
         prepared.question,
@@ -585,7 +687,7 @@ export function createNexoRuntime({
         route: prepared.route,
         model: prepared.model,
         metrics,
-        context: prepared.contextStats,
+        context: { ...prepared.contextStats, responseQuality: quality },
       },
       { source: 'nexo-runtime-v6' },
     );
@@ -595,7 +697,7 @@ export function createNexoRuntime({
       metrics,
       route: prepared.route,
       model: prepared.modelLabel,
-      context: prepared.contextStats,
+      context: { ...prepared.contextStats, responseQuality: quality },
     };
   }
 
@@ -639,6 +741,7 @@ export function createNexoRuntime({
         autonomousBudgets: true,
         explicitMemoryCommands: true,
         smartResume: Boolean(personal),
+        conversationState: conversation?.health?.() || null,
         cacheEntries: cache.size(),
         personality: personality.health(),
       };

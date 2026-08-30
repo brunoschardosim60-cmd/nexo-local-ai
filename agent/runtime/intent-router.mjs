@@ -6,12 +6,19 @@ const SERIOUS_PATTERNS = /\b(?:luto|morte|morreu|doença|doenca|depress|ansiedad
 const SECURITY_PATTERNS = /\b(?:senha|credencial|token|segredo|vulnerabilidade|malware|ransomware|invas|hack|segurança|seguranca|firewall|vpn)\b/i;
 const CODING_PATTERNS = /\b(?:codigo|código|bug|erro|typescript|javascript|python|react|node|api|função|funcao|classe|build|teste|program)\b/i;
 const STUDY_PATTERNS = /\b(?:estud|prova|faculdade|escola|aprender|matéria|materia|exercício|exercicio|explica)\b/i;
-const PLAYFUL_PATTERNS = /(?:\bkk+k+\b|\bha(?:ha)+\b|\brs+\b|😂|🤣|\bzoa|brincadeira|meme\b)/i;
+const PLAYFUL_PATTERNS = /(?:\bkk+k+\b|\bha(?:ha)+\b|\brs+\b|😂|🤣|\bzoa|brincadeira|meme\b|\b(?:bb|bebe|bebê)\b)/i;
 const FRUSTRATED_PATTERNS = /\b(?:irritad|frustrad|cansad|de novo|n[aã]o funciona|que saco|puta merda|porra)\b/i;
 const SENSITIVE_PATTERNS = /\b(?:trauma|luto|suic|abuso|viol[eê]ncia|depress|doen[cç]a grave|diagn[oó]stico)\b/i;
 
 export function normalizeIntent(value = '') {
-  return String(value).normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().trim().replace(/[?!.,]+$/g, '');
+  const replacements = new Map([
+    ['oq', 'o que'], ['pq', 'por que'], ['vc', 'voce'], ['vcs', 'voces'],
+    ['agr', 'agora'], ['tbm', 'tambem'], ['qm', 'quem'], ['ns', 'nao sei'],
+    ['q', 'que'], ['ta', 'esta'],
+  ]);
+  return String(value).normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().trim()
+    .replace(/[a-z0-9_]+/g, token => replacements.get(token) || token)
+    .replace(/[?!.,]+$/g, '').replace(/\s+/g, ' ');
 }
 
 export function classifyConversationContext(question = '') {
@@ -42,7 +49,7 @@ export function instantAnswer(question, { now = new Date(), weather = null } = {
 export function routeIntent({ question, mode = 'Geral', effort = 'Médio', hasDocuments = false, webSearch = false, weather = null, now = new Date() }) {
   const immediate = instantAnswer(question, { now, weather });
   const context = classifyConversationContext(question);
-  const presence = /^(?:(?:oi|ola|iai|e ai|eae|opa)(?:\s+nexo)?|(?:nexo[,]?\s*)?(?:ta|esta|voce esta) por ai)$/.test(normalizeIntent(question));
+  const presence = /^(?:(?:o+i+e*|ol+a+|i+a+i+|e+a+e+|e+ ai+|opa+)(?:\s+(?:nexo|bb|bebe|mano|cara))?|(?:nexo[,]?\s*)?(?:esta|voce esta) por ai)$/.test(normalizeIntent(question));
   if (mode === 'Agente' || AGENT_PATTERNS.test(question)) {
     return { route: 'agent', context, reason: mode === 'Agente' ? 'modo-agente' : 'ação-local-complexa', needs: { memory: true, rag: hasDocuments || DOCUMENT_PATTERNS.test(question), research: webSearch } };
   }

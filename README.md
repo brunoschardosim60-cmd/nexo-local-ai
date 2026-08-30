@@ -10,6 +10,7 @@ O `Nexo Core` fica em `agent/`, separado da interface:
 
 - `core/` e `goals/`: fachada do runtime, Goal Engine, Task Graph persistente e checkpoints.
 - `runtime/`: roteamento `INSTANT`/`FAST`/`DEEP`/`AGENT`, streaming, cache e carregamento progressivo de contexto.
+- `conversation/`: SelfModel canônico, estado conversacional compacto por chat, resolução de referentes, correções e apelidos com escopo de relação.
 - `personality/`: identidade-base, adaptação gradual por confiança/contradição e limites por contexto.
 - `orchestrator/`: Agent Loop, planejamento, execução, verifier, Critic, autocorreção com orçamento, retries e replanejamento.
 - `tools/`: contratos JSON validados, filesystem, patch com hash, Git, projetos e shell restrito.
@@ -32,6 +33,8 @@ A interface usa `lib/nexo` como SDK e `hooks/use-nexo-task-sync.ts` para acompan
 No modo **Agente**, o Nexo devolve o controle da interface imediatamente, cria um objetivo estável e um Task Graph em segundo plano, executa nós independentes em paralelo, pausa antes de escrita ou terminal, retoma após aprovação e valida evidências antes de concluir. Cada tarefa possui orçamento de passos, tools, chamadas de modelo e duração; o botão cancelar propaga um `AbortSignal` às execuções ativas. A interface mostra objetivo, operação atual, consumo, critérios `PASS`/`FAIL`/`UNCERTAIN`/`NOT_CHECKED`, progresso e permissões.
 
 Perguntas determinísticas não acionam modelo. Conversa simples usa o 3B com prompt mínimo; memória, RAG e pesquisa só entram quando a intenção exige. O Router escolhe automaticamente entre chat, código, raciocínio, pesquisa, documentos, dados e visão, respeitando uma seleção explícita de esforço alto. O verificador confronta objetivo, critérios e evidências e termina em `PASS`, `FAIL` ou `UNCERTAIN`; `FAIL` e `UNCERTAIN` acionam o Critic e até três estratégias diferentes antes da conclusão.
+
+O chat rápido preserva seis mensagens recentes e um `ConversationState` pequeno, persistido no SQLite e separado da memória semântica. O estado mantém o nome do usuário, nome canônico `Nexo`, apelido escolhido pelo usuário, tópico, referente atual, tom, correção recente e respostas sociais recentes. Perguntas como `e o seu?` são resolvidas nesse estado antes de qualquer RAG; por isso fatos locais simples não pagam a latência da busca semântica. Respostas sociais passam por verificação de identidade, papéis, repetição e sanidade. O fallback grounded só entra quando a geração contradiz os fatos autoritativos.
 
 O Core registra as tools dinamicamente. A inteligência de código usa AST TypeScript/JavaScript, declarações, chamadas e referências textuais; ainda não possui Tree-sitter, LSP ou call graph semântico completo. Debugging mantém hipóteses e experimentos persistentes. A pesquisa pode decompor perguntas e construir uma matriz multi-fonte de evidências, cobertura, datas e lacunas. Wikipedia, OpenAlex e Stack Overflow não exigem chave paga; toda chamada externa continua dependendo de aprovação. O modelo `qwen2.5vl:3b` interpreta imagens localmente. Geração raster usa Stable Diffusion WebUI/Forge quando esse provider estiver instalado e ativo; se não estiver, a UI informa a indisponibilidade e não fabrica um SVG como resultado.
 
@@ -100,13 +103,16 @@ npm run eval:personal
 npm run eval:multimodal
 npm run eval:extensions
 npm run eval:coding-browser
+npm run eval:conversation
+npm run eval:conversation-live
 npm run eval:master
+npm run benchmark:conversation
 npm run benchmark:memory
 npm run benchmark:v4
 npm run benchmark:v5
 ```
 
-`eval:intelligence` contém 200 casos de prontidão estrutural; ele não deve ser confundido com qualidade generativa. `eval:autonomy` executa 36 verificações de capacidade, incluindo um navegador Edge real com DOM, clique, console e screenshot. `eval:coding-browser` mantém 20 gates determinísticos para objetivo, inspeção, validação, plano integrado e contratos de navegador; ele não substitui uma futura taxa de resolução com 20 projetos quebrados e o modelo local real. `eval:master` mantém golden tasks do control plane para routing, honestidade, segurança, linguagem e false-success; seu próprio relatório declara que não mede qualidade generativa. `eval:media` usa `SKIPPED` para providers realmente ausentes. `benchmark:v4` separa runtime, TTFT, total, cold/warm e modelo. O Router só usa um benchmark de qualidade persistido quando há pelo menos 10 amostras reais naquele domínio.
+`eval:intelligence` contém 200 casos de prontidão estrutural; ele não deve ser confundido com qualidade generativa. `eval:conversation` executa 120 conversas de 6 turnos (720 turnos) para identidade, apelidos, pronomes, correções, informalidade, tom e contradições; `eval:conversation-live` reproduz o transcript real no modelo local e mede TTFT. `benchmark:conversation` compara os modelos locais no mesmo conjunto social curto. `eval:autonomy` executa 36 verificações de capacidade, incluindo um navegador Edge real com DOM, clique, console e screenshot. `eval:coding-browser` mantém 20 gates determinísticos para objetivo, inspeção, validação, plano integrado e contratos de navegador; ele não substitui uma futura taxa de resolução com 20 projetos quebrados e o modelo local real. `eval:master` mantém golden tasks do control plane para routing, honestidade, segurança, linguagem e false-success; seu próprio relatório declara que não mede qualidade generativa. `eval:media` usa `SKIPPED` para providers realmente ausentes. `benchmark:v4` separa runtime, TTFT, total, cold/warm e modelo. O Router só usa um benchmark de qualidade persistido quando há pelo menos 10 amostras reais naquele domínio.
 
 ## Skills e MCP
 

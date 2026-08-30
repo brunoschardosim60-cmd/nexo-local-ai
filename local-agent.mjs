@@ -194,7 +194,7 @@ const server = createServer(async (request, response) => {
         input.documents = [...(Array.isArray(input.documents) ? input.documents : []), {name:'Percepção multimodal V2',content:perceptual.summary}];
         input.attachments = [];
       }
-      const prepared = await core.runtime.prepare(input); audit('runtime_chat', prepared.route, true, prepared.kind);
+      const prepared = await core.runtime.prepare(input); audit('runtime_chat', prepared.route, true, JSON.stringify({ kind: prepared.kind, model: prepared.model || prepared.modelLabel || null, historyTurns: prepared.contextStats?.historyMessages || 0, workingStateFields: prepared.contextStats?.workingStateFields || [], memoryRetrievalCount: prepared.contextStats?.memoryLoaded ? 1 : 0, identityIncluded: prepared.contextStats?.identityIncluded || false }));
       if (prepared.kind === 'instant') return send(response, 200, { ok: true, ...prepared });
       if (prepared.kind === 'task') return send(response, 202, { ok: true, ...prepared });
       return streamRuntime(request, response, prepared);
