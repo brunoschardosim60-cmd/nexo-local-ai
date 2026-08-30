@@ -55,7 +55,7 @@ export function createBrowserAgent({ workspace, database, research, browserPath 
       const child = spawn(browserPath, args, { shell: false, windowsHide: true, stdio: ['ignore', 'ignore', 'pipe'] }); let stderr = '';
       const timer = setTimeout(() => { child.kill('SIGTERM'); reject(new Error('Tempo limite da captura atingido.')); }, 30_000);
       child.stderr.on('data', chunk => { stderr = `${stderr}${chunk}`.slice(-4_000); }); child.on('error', error => { clearTimeout(timer); reject(error); });
-      child.on('close', code => { clearTimeout(timer); code === 0 ? resolvePromise() : reject(new Error(stderr || `Navegador terminou com código ${code}.`)); });
+      child.on('close', code => { clearTimeout(timer); if (code === 0) resolvePromise(); else reject(new Error(stderr || `Navegador terminou com código ${String(code)}.`)); });
     });
     const bytes = await readFile(output); const dimensions = pngSize(bytes); const info = await stat(output);
     return { url, path: output.slice(workspace.length + 1), fileName: basename(output), bytes: info.size, ...dimensions, capturedAt: new Date().toISOString() };
@@ -66,8 +66,8 @@ export function createBrowserAgent({ workspace, database, research, browserPath 
       { name: 'png-readable', passed: true, detail: 'Assinatura PNG e cabeçalho válidos.' },
       { name: 'minimum-bytes', passed: bytes.length >= minimumBytes, detail: `${bytes.length} bytes; mínimo ${minimumBytes}.` },
     ];
-    if (expectedWidth != null) checks.push({ name: 'expected-width', passed: dimensions.width === expectedWidth, detail: `${dimensions.width}px; esperado ${expectedWidth}px.` });
-    if (expectedHeight != null) checks.push({ name: 'expected-height', passed: dimensions.height === expectedHeight, detail: `${dimensions.height}px; esperado ${expectedHeight}px.` });
+    if (expectedWidth != null) checks.push({ name: 'expected-width', passed: dimensions.width === expectedWidth, detail: `${dimensions.width}px; esperado ${String(expectedWidth)}px.` });
+    if (expectedHeight != null) checks.push({ name: 'expected-height', passed: dimensions.height === expectedHeight, detail: `${dimensions.height}px; esperado ${String(expectedHeight)}px.` });
     return { path, ...dimensions, bytes: bytes.length, valid: checks.every(check => check.passed), checks, inspectedAt: new Date().toISOString(), limitation: 'Verificação estrutural. Análise visual semântica exige um modelo local com visão.' };
   }
 

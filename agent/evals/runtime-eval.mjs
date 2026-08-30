@@ -19,6 +19,11 @@ try {
   evaluate('background-persistence', core.scheduler.schedule({ name: 'Eval', objective: 'Verifique o estado do projeto', delaySeconds: 60 }).status === 'active', 'job persistido');
   evaluate('capability-health', Boolean(health.capabilities?.browser && health.capabilities?.mcp && health.capabilities?.events), 'capacidades observáveis');
   evaluate('multi-agent', health.capabilities?.multiAgent?.maxParallel === 4, 'até quatro subtarefas paralelas');
+  evaluate('runtime-routes', ['instant', 'fast', 'deep', 'agent'].every(route => health.capabilities?.runtime?.routes.includes(route)), 'quatro rotas ativas');
+  evaluate('instant-path', core.runtime.route({ question: 'que horas são?' }).route === 'instant', 'horário não aciona modelo');
+  evaluate('progressive-context', core.runtime.route({ question: 'iai' }).needs.memory === false, 'conversa leve não carrega memória');
+  evaluate('adaptive-personality', health.capabilities?.personality?.adaptive === true, 'estilo persistente com limites');
+  evaluate('honest-isolation', health.capabilities?.safety?.osIsolation === false && health.capabilities?.safety?.shell === false, 'executor restrito não se declara VM');
 } finally { core.close(); await rm(directory, { recursive: true, force: true }); }
 
 const passed = cases.filter(item => item.passed).length; const score = Math.round((passed / cases.length) * 100);

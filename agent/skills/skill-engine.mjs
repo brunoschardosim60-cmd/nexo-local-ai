@@ -28,7 +28,7 @@ export function createSkillEngine({ roots, database }) {
 
   async function refresh() {
     const files = (await Promise.all(roots.map(root => findSkillFiles(resolve(root))))).flat(); const states = database.getSkillStates(); const skills = [];
-    for (const file of [...new Set(files)]) {
+    for (const file of new Set(files)) {
       const allowed = roots.some(root => file === resolve(root) || file.startsWith(`${resolve(root)}${sep}`)); if (!allowed) continue;
       const content = await readFile(file, 'utf8'); if (content.length > 50_000) continue;
       skills.push({ ...parseSkill(content, file), enabled: states.has(file) ? states.get(file) : true });

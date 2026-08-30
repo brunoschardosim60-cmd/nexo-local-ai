@@ -7,9 +7,11 @@ Runtime local-first para agentes pessoais, com interface web, memória persisten
 O `Nexo Core` fica em `agent/`, separado da interface:
 
 - `core/`: fachada do runtime, Task Graph persistente e checkpoints.
+- `runtime/`: roteamento `INSTANT`/`FAST`/`DEEP`/`AGENT`, streaming, cache e carregamento progressivo de contexto.
+- `personality/`: identidade-base, adaptação gradual por confiança/contradição e limites por contexto.
 - `orchestrator/`: Agent Loop, planejamento, execução, verifier, retries e replanejamento.
 - `tools/`: contratos JSON validados, filesystem, patch com hash, Git, projetos e shell restrito.
-- `safety/`: permissões por risco, limites e sandbox de processos.
+- `safety/`: permissões por risco, limites e executor de processos sem shell com allowlist. Ele reduz a superfície de ataque, mas não substitui isolamento de SO por contêiner ou VM.
 - `memory/`: SQLite, FTS, memória working/episódica/semântica/procedural/user e recuperação vetorial local.
 - `context/`: Context Engine com orçamento, RAG, proteção contra prompt injection, mapa de repositório e busca de símbolos.
 - `models/`: cliente Ollama e roteamento entre os modelos 3B e 7B.
@@ -19,13 +21,13 @@ O `Nexo Core` fica em `agent/`, separado da interface:
 - `background/` e `events/`: scheduler persistente e event bus local.
 - `mcp/`: cliente MCP stdio JSON-RPC para servidores explicitamente configurados.
 
-A interface usa `lib/nexo` como SDK e `hooks/use-nexo-task-sync.ts` para acompanhar execuções. Ela não implementa o raciocínio do agente.
+A interface usa `lib/nexo` como SDK e `hooks/use-nexo-task-sync.ts` para acompanhar execuções. Chat, aquecimento de modelos, pesquisa, memória e ações passam pelo Runtime; a interface não mantém um segundo cérebro.
 
-No modo **Agente**, o Nexo devolve o controle da interface imediatamente, cria um Task Graph em segundo plano, executa leituras automaticamente, pausa antes de escrita ou terminal, retoma após aprovação e valida o resultado antes de concluir. A interface acompanha o progresso sem precisar recarregar. Cada tarefa possui limites, retries, grafo, eventos e checkpoints recuperáveis após reinício.
+No modo **Agente**, o Nexo devolve o controle da interface imediatamente, cria um Task Graph em segundo plano, executa nós independentes em paralelo, pausa antes de escrita ou terminal, retoma após aprovação e valida o resultado antes de concluir. A interface acompanha o progresso sem precisar recarregar. Cada tarefa possui limites, retries, grafo, eventos e checkpoints recuperáveis após reinício.
 
-Tarefas simples usam o modelo 3B para reduzir latência e RAM; planejamento e programação complexos usam o 7B. O resultado final é montado a partir das saídas reais das ferramentas. Uma alteração de arquivo só é marcada como validada quando há teste, lint, typecheck ou build bem-sucedido registrado.
+Perguntas determinísticas não acionam modelo. Conversa simples usa o 3B com prompt mínimo; memória, RAG e pesquisa só entram quando a intenção exige. Planejamento e trabalho profundo usam o 7B. O verificador confronta objetivo, critérios e evidências e termina em `PASS`, `FAIL` ou `UNCERTAIN`; uma alteração de arquivo sem teste, lint, typecheck ou build bem-sucedido nunca recebe `PASS`.
 
-O Core 2.0 registra 34 tools. Pesquisa usa Wikipedia, OpenAlex e Stack Overflow sem exigir chave paga; toda chamada externa continua dependendo de aprovação. O Browser Agent mantém sessões persistentes, bloqueia protocolos e redes privadas indevidas e pode usar Chrome ou Edge headless para gerar screenshots no workspace. O verificador visual atual confirma integridade, peso e dimensões; interpretação semântica da imagem exigirá um modelo local com visão.
+O Core 3.0 registra 34 tools. Pesquisa usa Wikipedia, OpenAlex e Stack Overflow sem exigir chave paga; toda chamada externa continua dependendo de aprovação. O Browser Agent mantém sessões persistentes, bloqueia protocolos e redes privadas indevidas e pode usar Chrome ou Edge headless para gerar screenshots no workspace. O verificador visual atual confirma integridade, peso e dimensões; interpretação semântica da imagem exigirá um modelo local com visão.
 
 Quando o trabalho realmente pode ser dividido, `agents.delegate` cria de duas a quatro subtarefas vinculadas à tarefa principal. Elas são executadas em paralelo pelo runtime e cada especialista mantém seus próprios passos, limites, eventos, checkpoints e pedidos de permissão.
 

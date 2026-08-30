@@ -58,6 +58,16 @@ test('Repository Intelligence encontra símbolos, referências e Git', async () 
   } finally { database.db.close(); await rm(directory, { recursive: true, force: true }); }
 });
 
+test('executor local bloqueia escapes de caminho e processadores externos', async () => {
+  const directory = await mkdtemp(join(tmpdir(), 'nexo-sandbox-'));
+  try {
+    const sandbox = createSandbox({ workspace: directory });
+    await assert.rejects(sandbox.run({ command: 'rg', args: ['--pre=cmd', 'segredo', '.'] }), /Opção não permitida/);
+    await assert.rejects(sandbox.run({ command: 'rg', args: ['segredo', '../fora'] }), /travessia/);
+    await assert.rejects(sandbox.run({ command: 'node', args: ['--check', 'C:\\Windows\\System32\\drivers\\etc\\hosts'] }), /absolutos/);
+  } finally { await rm(directory, { recursive: true, force: true }); }
+});
+
 test('Nexo Core expõe runtime completo e remove segredos do contexto', async () => {
   const directory = await mkdtemp(join(tmpdir(), 'nexo-core-')); const dataDir = join(directory, 'data');
   const core = createNexoCore({ projectRoot: directory, workspace: directory, dataDir, autoResume: false });

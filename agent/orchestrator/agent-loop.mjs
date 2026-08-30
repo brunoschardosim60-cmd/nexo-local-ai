@@ -2,7 +2,7 @@ import { createTrace } from '../observability/tracing.mjs';
 import { validateTaskLimits } from '../safety/policies.mjs';
 
 const TERMINAL = new Set(['completed', 'completed_with_warnings', 'failed', 'cancelled']);
-function completedPrefix(plan, index) { return plan.slice(0, index).filter(step => step.status === 'completed'); }
+function completedSteps(plan) { return plan.filter(step => step.status === 'completed'); }
 
 export function createAgentLoop({ config, database, registry, permissionManager, planner, executor, evaluator, memory, rag, logger, taskGraph, checkpoints, contextEngine, eventBus = null }) {
   const backgroundRuns = new Map();
@@ -79,9 +79,69 @@ export function createAgentLoop({ config, database, registry, permissionManager,
       if (TERMINAL.has(task.status) || task.status === 'paused' || task.status === 'awaiting_approval') return snapshot(taskId);
       if (task.stepsUsed >= task.maxSteps) return fail(taskId, `Limite seguro de ${task.maxSteps} passos atingido.`);
       if (Date.now() - new Date(task.createdAt).getTime() > config.limits.maxTaskMinutes * 60_000) return fail(taskId, 'Tempo máximo da tarefa atingido.');
-      if (task.currentStep >= task.plan.length) return finish(task);
-
-      const stepIndex = task.currentStep; let step = task.plan[stepIndex]; if (!step) return finish(task);
+      if (task.plan.length > 0 && task.plan.every(step => step.status === 'completed')) return finish(task);
+      const readyNodes = graph.ready(taskId);
+      if (!readyNodes.length) {
+        const validation = graph.validate(taskId);
+        if (validation.valid && task.plan.some(step => step.status === 'awaiting_approval')) {
+          database.updateTask(taskId, { status: 'awaiting_approval' }); return snapshot(taskId);
+        }
+        return fail(taskId, validation.valid ? 'O grafo não possui etapas executáveis; alguma dependência não foi concluída.' : `Grafo de tarefas inválido: ${validation.errors.join(' ')}`);
+      }
+      if (readyNodes.length > 1) {
+        let plan = [...task.plan];
+        const selections = await Promise.allSettled(readyNodes.map(async node => {
+          const index = plan.findIndex(item => item.id === node.id); const candidate = plan[index];
+          if (candidate.action) return { index, action: candidate.action };
+          const context = await contexts.build({ objective: `${task.objective}\n${candidate.description}`, task, events: database.getEvents(taskId), runs: database.getToolRuns(taskId) });
+          const action = await planner.selectAction({ task: { ...task, currentStep: index }, step: candidate, tools: registry.describe(), events: database.getEvents(taskId), runs: database.getToolRuns(taskId), memories: context.memories, documents: context.documents, context });
+          registry.get(action.tool); return { index, action };
+        }));
+        for (const selection of selections) {
+          if (selection.status !== 'fulfilled') continue;
+          const { index, action } = selection.value; const candidate = plan[index];
+          plan[index] = { ...candidate, action, status: 'ready', model: action.model || null, successCriteria: [action.successCriteria] };
+          database.addEvent(taskId, 'tool.selected', `${action.tool}: ${action.reason}`, { tool: action.tool, input: action.input, successCriteria: action.successCriteria, parallelCandidate: true });
+        }
+        task = database.updateTask(taskId, { plan }); graph.sync(taskId, plan);
+        const batch = readyNodes.map(node => {
+          const index = plan.findIndex(item => item.id === node.id); return { index, step: plan[index] };
+        }).filter(item => item.index >= 0 && item.step?.action);
+        const policies = batch.map(item => permissionManager.inspect(registry.get(item.step.action.tool), item.step.action.input));
+        const denied = policies.find(policy => policy.decision === 'deny'); if (denied) return fail(taskId, denied.reason);
+        const allSelected = batch.length === readyNodes.length; const safeParallel = allSelected && policies.every(policy => !policy.required);
+        if (safeParallel) {
+          if (task.stepsUsed + batch.length > task.maxSteps) return fail(taskId, `O lote paralelo ultrapassaria o limite seguro de ${task.maxSteps} passos.`);
+          checkpointStore.capture(taskId, 'before-parallel-batch', `Antes de ${batch.length} etapas independentes`);
+          for (const item of batch) database.addEvent(taskId, 'tool.started', `Executando ${item.step.action.tool} em lote paralelo.`, { input: item.step.action.input, stepId: item.step.id });
+          const executions = await Promise.all(batch.map(item => executor.execute({ taskId, stepIndex: item.index, action: item.step.action, maxRetries: task.maxRetries })));
+          const evaluations = executions.map((execution, index) => evaluator.evaluateTool(batch[index].step.action, execution)); task = database.getTask(taskId);
+          if (task.status === 'cancelled') return snapshot(taskId);
+          plan = [...task.plan];
+          for (let index = 0; index < batch.length; index += 1) {
+            const item = batch[index]; const execution = executions[index]; const evaluation = evaluations[index];
+            if (!evaluation.success) continue;
+            plan[item.index] = { ...plan[item.index], status: 'completed', output: execution.output, attempts: execution.attempt, observations: [...(plan[item.index].observations || []), evaluation.reason], completedAt: new Date().toISOString() };
+            database.addEvent(taskId, 'step.completed', `${item.step.title} concluída em paralelo.`, { tool: item.step.action.tool, evaluation: evaluation.reason });
+          }
+          const failedIndex = evaluations.findIndex(evaluation => !evaluation.success);
+          if (failedIndex >= 0) {
+            const failed = batch[failedIndex]; const reason = evaluations[failedIndex].reason; const completed = completedSteps(plan);
+            database.addEvent(taskId, 'step.failed', `${failed.step.title}: ${reason}`, { tool: failed.step.action.tool, parallelBatch: true }, 'warn');
+            const recovery = await planner.replan({ task: { ...task, plan }, failedStep: failed.step, error: reason, completedSteps: completed });
+            if (!recovery.length) return fail(taskId, `Não foi possível replanejar após a falha: ${reason}`);
+            plan = [...completed, ...recovery]; database.updateTask(taskId, { plan, currentStep: completed.length, stepsUsed: task.stepsUsed + batch.length, status: 'running' }); graph.sync(taskId, plan);
+            database.addEvent(taskId, 'task.replanned', 'O plano foi ajustado após falha em lote paralelo.', { recoverySteps: recovery.map(item => item.title) }); checkpointStore.capture(taskId, 'replan', reason); continue;
+          }
+          database.updateTask(taskId, { plan, stepsUsed: task.stepsUsed + batch.length, status: 'running' }); graph.sync(taskId, plan);
+          database.addEvent(taskId, 'dag.parallel_batch_completed', `${batch.length} etapas independentes terminaram em paralelo.`, { stepIds: batch.map(item => item.step.id) });
+          checkpointStore.capture(taskId, 'after-parallel-batch', `${batch.length} etapas independentes concluídas`); continue;
+        }
+      }
+      const readyNode = readyNodes[0];
+      const stepIndex = task.plan.findIndex(item => item.id === readyNode.id); let step = task.plan[stepIndex];
+      if (!step || stepIndex < 0) return fail(taskId, 'O grafo divergiu do plano persistido.');
+      if (task.currentStep !== stepIndex) task = database.updateTask(taskId, { currentStep: stepIndex });
       const completedRun = database.getToolRuns(taskId).filter(item => item.stepIndex === stepIndex && item.status === 'completed').at(-1);
       if (completedRun && step.status !== 'completed') {
         const plan = [...task.plan]; plan[stepIndex] = { ...step, status: 'completed', output: completedRun.output, observations: [...(step.observations || []), 'Recuperado de uma execução persistida.'] };
@@ -102,8 +162,9 @@ export function createAgentLoop({ config, database, registry, permissionManager,
           database.addEvent(taskId, 'tool.selected', `${action.tool}: ${action.reason}`, { tool: action.tool, input: action.input, successCriteria: action.successCriteria });
         } catch (error) {
           const reason = error instanceof Error ? error.message : 'Falha ao selecionar ferramenta.'; database.addEvent(taskId, 'planner.failed', reason, null, 'warn');
-          const recovery = await planner.replan({ task, failedStep: step, error: reason, completedSteps: completedPrefix(task.plan, stepIndex) });
-          const plan = [...completedPrefix(task.plan, stepIndex), ...recovery]; const nextIndex = completedPrefix(task.plan, stepIndex).length;
+          const completed = completedSteps(task.plan); const recovery = await planner.replan({ task, failedStep: step, error: reason, completedSteps: completed });
+          if (!recovery.length) return fail(taskId, `Não foi possível replanejar: ${reason}`);
+          const plan = [...completed, ...recovery]; const nextIndex = completed.length;
           database.updateTask(taskId, { plan, currentStep: nextIndex, stepsUsed: task.stepsUsed + 1, status: 'running' }); graph.sync(taskId, plan); checkpointStore.capture(taskId, 'replan', reason); continue;
         }
       }
@@ -140,9 +201,10 @@ export function createAgentLoop({ config, database, registry, permissionManager,
       }
 
       database.addEvent(taskId, 'step.failed', `${step.title}: ${evaluation.reason}`, { tool: tool.name, trace: span.finish({ ok: false }) }, 'warn');
-      const completed = completedPrefix(task.plan, stepIndex); const recovery = await planner.replan({ task, failedStep: step, error: evaluation.reason, completedSteps: completed });
-      const failedStep = { ...step, status: 'failed', error: evaluation.reason, attempts: execution.attempt }; const plan = [...completed, failedStep, ...recovery];
-      database.updateTask(taskId, { plan, currentStep: completed.length + 1, stepsUsed: task.stepsUsed + 1, status: 'running' }); graph.sync(taskId, plan);
+      const completed = completedSteps(task.plan); const recovery = await planner.replan({ task, failedStep: step, error: evaluation.reason, completedSteps: completed });
+      if (!recovery.length) return fail(taskId, `Não foi possível replanejar após a falha: ${evaluation.reason}`);
+      const plan = [...completed, ...recovery];
+      database.updateTask(taskId, { plan, currentStep: completed.length, stepsUsed: task.stepsUsed + 1, status: 'running' }); graph.sync(taskId, plan);
       database.addEvent(taskId, 'task.replanned', 'O plano foi ajustado após a falha.', { recoverySteps: recovery.map(item => item.title) }); checkpointStore.capture(taskId, 'replan', evaluation.reason);
     }
   }
@@ -150,6 +212,10 @@ export function createAgentLoop({ config, database, registry, permissionManager,
   function resolvePermission(taskId, permissionId, decision) {
     const permission = database.getPermission(permissionId); if (!permission || permission.taskId !== taskId) throw new Error('Permissão não encontrada.');
     const resolved = permissionManager.resolve(permissionId, decision);
+    if (resolved.status === 'approved') {
+      const task = database.getTask(taskId); const plan = task.plan.map(step => step.permissionId === permissionId ? { ...step, status: 'ready' } : step);
+      database.updateTask(taskId, { plan }); graph.sync(taskId, plan);
+    }
     database.addEvent(taskId, `permission.${resolved.status}`, resolved.status === 'approved' ? `Ação ${resolved.tool} aprovada pelo usuário.` : `Ação ${resolved.tool} negada pelo usuário.`, { permissionId, tool: resolved.tool }); return resolved;
   }
 

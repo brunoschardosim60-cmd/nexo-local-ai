@@ -7,6 +7,19 @@ export type ChatMessage = {
 export type Chat = { id: string; title: string; messages: ChatMessage[]; updatedAt: number };
 export type LocalDocument = { name: string; content: string };
 export type UserProfile = { name: string; city: string; style: string; instructions: string };
+export type RuntimeRoute = 'instant' | 'fast' | 'deep' | 'agent';
+export type RuntimeContextStats = {
+  historyMessages: number; contextChars: number; memoryLoaded: boolean; ragLoaded: boolean; researchLoaded: boolean;
+  cacheHits: Array<{ source: string; cached: boolean }>;
+};
+export type RuntimeStreamEvent =
+  | { type: 'meta'; route: RuntimeRoute; model: string; context: RuntimeContextStats }
+  | { type: 'token'; content: string }
+  | { type: 'done'; content: string; route: RuntimeRoute; model: string; metrics?: Record<string, number>; context: RuntimeContextStats }
+  | { type: 'error'; error: string };
+export type RuntimeImmediateResponse =
+  | { ok: true; kind: 'instant'; route: 'instant'; content: string; model: string; context: string }
+  | { ok: true; kind: 'task'; route: 'agent'; task: AgentTask; model: string; context: string };
 
 export type NexoAction = {
   type: 'write_file' | 'create_folder' | 'read_file' | 'list_files' | 'create_project';
@@ -34,7 +47,10 @@ export type AgentTask = {
   id: string; objective: string; status: string; plan: AgentTaskStep[]; graph?: AgentTaskNode[]; checkpoints?: AgentCheckpoint[];
   parentTaskId?: string | null; assignedAgent?: string; children?: Array<{ id: string; objective: string; status: string; assignedAgent?: string }>;
   currentStep: number; stepsUsed: number; maxSteps: number; maxRetries: number;
-  result?: { validated?: boolean; summary?: string; evidence?: string[]; remainingRisks?: string[] };
+  result?: {
+    verdict?: 'PASS' | 'FAIL' | 'UNCERTAIN'; validated?: boolean; confidence?: number; summary?: string; evidence?: string[]; remainingRisks?: string[];
+    acceptanceCriteria?: Array<{ criterion: string; met: boolean }>;
+  };
   error?: string; permissions: AgentPermission[]; events: AgentTaskEvent[];
 };
 export type AgentHealth = {
@@ -46,6 +62,9 @@ export type AgentHealth = {
     tasks: { total: number; running: number }; limits: { maxSteps: number; maxRetries: number };
     taskGraph?: boolean; checkpoints?: boolean; contextEngine?: boolean; repositoryIntelligence?: boolean;
     capabilities?: {
+      runtime?: { version: string; routes: RuntimeRoute[]; progressiveContext: boolean; streaming: boolean; cacheEntries: number };
+      personality?: { adaptive: boolean; learnedTraits: number; observations: number };
+      safety?: { processIsolation: string; osIsolation: boolean; shell: boolean };
       research?: { providers: string[]; paidKeysRequired: boolean };
       browser?: { available: boolean; engine?: string | null; screenshots: boolean; persistentSessions: boolean };
       coding?: { checks: string[]; repositoryAware: boolean };

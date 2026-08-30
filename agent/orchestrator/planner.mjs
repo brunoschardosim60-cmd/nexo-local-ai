@@ -41,7 +41,7 @@ function normalizePlan(value, objective, specialists = null) {
 
 export function createPlanner({ ollama, router, specialists = null }) {
   return {
-    async createPlan({ objective, preferredSpecialist = 'general', tools, memories, documents, context }) {
+    async createPlan({ objective, preferredSpecialist = 'general', tools, context }) {
       try {
         const complexity = router.complexity(objective);
         const result = await ollama.json({
@@ -52,7 +52,7 @@ export function createPlanner({ ollama, router, specialists = null }) {
         return normalizePlan(result, objective, specialists);
       } catch { return fallbackPlan(objective, { ...specialists, suggest: () => preferredSpecialist === 'general' ? specialists?.suggest?.(objective) || 'general' : preferredSpecialist }); }
     },
-    async selectAction({ task, step, tools, events, runs, memories, documents, context }) {
+    async selectAction({ task, step, tools, context }) {
       const complexity = router.complexity(task.objective);
       const result = await ollama.json({
         model: router.choose('tool-selection', complexity), numPredict: complexity === 'high' ? 1600 : 700,

@@ -93,6 +93,16 @@ export function createDatabase(dataDir) {
       history_json TEXT NOT NULL DEFAULT '[]', snapshot_json TEXT NOT NULL DEFAULT '{}',
       created_at TEXT NOT NULL, updated_at TEXT NOT NULL
     )`,
+    `CREATE TABLE IF NOT EXISTS personality_traits (
+      trait TEXT PRIMARY KEY, value REAL NOT NULL, confidence REAL NOT NULL,
+      evidence_count INTEGER NOT NULL DEFAULT 0, contradiction_count INTEGER NOT NULL DEFAULT 0,
+      source TEXT NOT NULL DEFAULT 'adaptive', updated_at TEXT NOT NULL
+    )`,
+    `CREATE TABLE IF NOT EXISTS personality_observations (
+      id TEXT PRIMARY KEY, trait TEXT NOT NULL, target_value REAL NOT NULL,
+      confidence REAL NOT NULL, explicit INTEGER NOT NULL DEFAULT 0,
+      context TEXT NOT NULL, signal TEXT NOT NULL, created_at TEXT NOT NULL
+    )`,
     `CREATE VIRTUAL TABLE IF NOT EXISTS memories_fts USING fts5(
       id UNINDEXED, kind UNINDEXED, content, tokenize='unicode61 remove_diacritics 2'
     )`,
@@ -110,6 +120,7 @@ export function createDatabase(dataDir) {
     'CREATE INDEX IF NOT EXISTS idx_runtime_events_type_sequence ON runtime_events(type, sequence DESC)',
     "CREATE INDEX IF NOT EXISTS idx_background_jobs_due ON background_jobs(status, next_run_at) WHERE status = 'active'",
     'CREATE INDEX IF NOT EXISTS idx_browser_sessions_updated ON browser_sessions(updated_at DESC)',
+    'CREATE INDEX IF NOT EXISTS idx_personality_observations_trait_created ON personality_observations(trait, created_at DESC)',
   ];
   for (const statement of statements) db.prepare(statement).run();
   const memoryColumns = new Set(db.prepare('PRAGMA table_info(memories)').all().map(column => column.name));
@@ -351,6 +362,42 @@ export function createDatabase(dataDir) {
   }
   function listBrowserSessions(limit = 30) { return db.prepare('SELECT id FROM browser_sessions ORDER BY updated_at DESC LIMIT ?').all(Math.max(1, Math.min(Number(limit) || 30, 100))).map(row => getBrowserSession(row.id)); }
 
+  function listPersonalityTraits() {
+    return db.prepare('SELECT * FROM personality_traits ORDER BY trait ASC').all().map(row => ({
+      trait: row.trait, value: row.value, confidence: row.confidence, evidenceCount: row.evidence_count,
+      contradictionCount: row.contradiction_count, source: row.source, updatedAt: row.updated_at,
+    }));
+  }
+  function upsertPersonalityTrait({ trait, value, confidence, evidenceCount = 1, contradictionCount = 0, source = 'adaptive' }) {
+    const now = new Date().toISOString();
+    db.prepare(`INSERT INTO personality_traits (trait, value, confidence, evidence_count, contradiction_count, source, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?)
+      ON CONFLICT(trait) DO UPDATE SET value=excluded.value, confidence=excluded.confidence,
+      evidence_count=excluded.evidence_count, contradiction_count=excluded.contradiction_count,
+      source=excluded.source, updated_at=excluded.updated_at`)
+      .run(trait, value, confidence, evidenceCount, contradictionCount, source, now);
+    return listPersonalityTraits().find(item => item.trait === trait) || null;
+  }
+  function addPersonalityObservation({ trait, targetValue, confidence, explicit = false, context = 'casual', signal }) {
+    const record = { id: randomUUID(), trait, targetValue, confidence, explicit: Boolean(explicit), context, signal, createdAt: new Date().toISOString() };
+    db.prepare('INSERT INTO personality_observations (id, trait, target_value, confidence, explicit, context, signal, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)')
+      .run(record.id, record.trait, record.targetValue, record.confidence, record.explicit ? 1 : 0, record.context, record.signal, record.createdAt);
+    db.prepare('DELETE FROM personality_observations WHERE id IN (SELECT id FROM personality_observations ORDER BY created_at DESC LIMIT -1 OFFSET 500)').run();
+    return record;
+  }
+  function listPersonalityObservations(limit = 100) {
+    return db.prepare('SELECT * FROM personality_observations ORDER BY created_at DESC LIMIT ?').all(Math.max(1, Math.min(Number(limit) || 100, 500))).map(row => ({
+      id: row.id, trait: row.trait, targetValue: row.target_value, confidence: row.confidence,
+      explicit: Boolean(row.explicit), context: row.context, signal: row.signal, createdAt: row.created_at,
+    }));
+  }
+  function resetPersonality() {
+    db.exec('BEGIN IMMEDIATE');
+    try { db.prepare('DELETE FROM personality_observations').run(); db.prepare('DELETE FROM personality_traits').run(); db.exec('COMMIT'); }
+    catch (error) { db.exec('ROLLBACK'); throw error; }
+    return { reset: true, at: new Date().toISOString() };
+  }
+
   return {
     db, createTask, getTask, listTasks, listChildTasks, updateTask, addEvent, getEvents, addToolRun, getToolRuns,
     createPermission, resolvePermission, getPermission, getPermissions, putMemory, listMemories, touchMemory, searchMemoriesText,
@@ -358,5 +405,6 @@ export function createDatabase(dataDir) {
     putCheckpoint, listCheckpoints, pruneCheckpoints, putRepositoryMap, getRepositoryMap, listInterruptedTasks,
     addRuntimeEvent, listRuntimeEvents, createBackgroundJob, getBackgroundJob, listBackgroundJobs, listDueBackgroundJobs, updateBackgroundJob,
     setSkillEnabled, getSkillStates, putBrowserSession, getBrowserSession, listBrowserSessions,
+    listPersonalityTraits, upsertPersonalityTrait, addPersonalityObservation, listPersonalityObservations, resetPersonality,
   };
 }

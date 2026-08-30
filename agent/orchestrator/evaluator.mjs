@@ -32,7 +32,9 @@ function observedRun(run) {
   return { summary: `${run.tool} concluída.`, evidence: [`${run.tool}: ${run.status}`] };
 }
 
-export function createEvaluator({ ollama, router }) {
+function includesObjective(objective, pattern) { return pattern.test(String(objective || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase()); }
+
+export function createEvaluator() {
   return {
     evaluateTool(action, execution) {
       if (!execution.ok) return { success: false, reason: execution.error };
@@ -46,15 +48,33 @@ export function createEvaluator({ ollama, router }) {
     async summarize(task, runs) {
       const completedRuns = runs.filter(run => run.status === 'completed');
       const observations = completedRuns.map(observedRun);
-      const changedFiles = completedRuns.some(run => ['write_file', 'filesystem.write', 'filesystem.patch'].includes(run.tool));
+      const changedFiles = completedRuns.some(run => ['write_file', 'filesystem.write', 'filesystem.patch', 'filesystem.mkdir', 'project.create'].includes(run.tool));
       const successfulCheck = completedRuns.some(run => (['run_command', 'shell.run'].includes(run.tool) && Number(run.output?.exitCode) === 0 && /(?:test|lint|build|typecheck|tsc|--check)/i.test(run.output?.command || '')) || (run.tool === 'code.validate' && run.output?.valid));
+      const researchEvidence = completedRuns.some(run => ['research.search', 'web.search', 'research.fetch', 'web.fetch', 'browser.open', 'browser.follow'].includes(run.tool));
       const planCompleted = task.plan.length > 0 && task.plan.every(step => step.status === 'completed');
-      const validated = planCompleted && completedRuns.length > 0 && (!changedFiles || successfulCheck);
-      const remainingRisks = changedFiles && !successfulCheck ? ['Houve alteração de arquivo, mas nenhum teste, lint, typecheck ou build bem-sucedido foi registrado.'] : [];
+      const asksForMutation = includesObjective(task.objective, /\b(cri|corr|edit|implement|refator|alter|remov|adicion|constru|fac|ger)[a-z]*/);
+      const asksForValidation = includesObjective(task.objective, /\b(test|valid|lint|build|compil|typecheck|verific|confir)[a-z]*/);
+      const asksForResearch = includesObjective(task.objective, /\b(pesquis|investig|busc|procure|internet|web)[a-z]*/);
+      const failedRuns = runs.filter(run => run.status === 'failed');
+      const acceptanceCriteria = [
+        { criterion: 'O plano terminou sem etapas pendentes.', met: planCompleted },
+        ...(asksForMutation ? [{ criterion: 'A mudança solicitada produziu um artefato observado.', met: changedFiles }] : []),
+        ...(asksForValidation || changedFiles ? [{ criterion: 'Uma validação relevante terminou com sucesso.', met: successfulCheck }] : []),
+        ...(asksForResearch ? [{ criterion: 'A pesquisa produziu fontes ou páginas observadas.', met: researchEvidence }] : []),
+      ];
+      const hardFailure = !planCompleted || completedRuns.length === 0 || (asksForMutation && !changedFiles) || (asksForValidation && !successfulCheck) || (asksForResearch && !researchEvidence);
+      const uncertain = !hardFailure && (failedRuns.length > 0 || (changedFiles && !successfulCheck));
+      const verdict = hardFailure ? 'FAIL' : uncertain ? 'UNCERTAIN' : 'PASS';
+      const validated = verdict === 'PASS';
+      const remainingRisks = [
+        ...(changedFiles && !successfulCheck ? ['Houve alteração de arquivo, mas nenhum teste, lint, typecheck ou build bem-sucedido foi registrado.'] : []),
+        ...(failedRuns.length ? [`${failedRuns.length} execução(ões) falharam antes do resultado final.`] : []),
+      ].filter((value, index, values) => values.indexOf(value) === index);
       const details = observations.map(item => item.summary).join(' ');
+      const confidence = verdict === 'PASS' ? 0.94 : verdict === 'FAIL' ? 0.9 : 0.58;
       return {
-        validated,
-        summary: validated ? `Objetivo executado com evidências locais. ${details}` : `A execução terminou, mas ainda precisa de validação. ${details}`,
+        verdict, validated, confidence, acceptanceCriteria,
+        summary: verdict === 'PASS' ? `PASS — objetivo comprovado com evidências locais. ${details}` : verdict === 'FAIL' ? `FAIL — o objetivo não foi comprovado. ${details}` : `UNCERTAIN — a execução produziu resultado, mas ainda falta evidência suficiente. ${details}`,
         evidence: observations.flatMap(item => item.evidence).slice(0, 12),
         remainingRisks,
       };

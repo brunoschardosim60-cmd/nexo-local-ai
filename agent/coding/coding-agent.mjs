@@ -12,7 +12,7 @@ export function createCodingAgent({ repository, sandbox }) {
   }
   async function validate({ cwd = '.', checks = ['test'] }) {
     const results = [];
-    for (const check of [...new Set(checks)]) {
+    for (const check of new Set(checks)) {
       const command = CHECKS[check]; if (!command) throw new Error(`Validação desconhecida: ${check}.`);
       const result = await sandbox.run({ command: command[0], args: command[1], cwd }); results.push({ check, ...result });
       if (result.exitCode !== 0) break;

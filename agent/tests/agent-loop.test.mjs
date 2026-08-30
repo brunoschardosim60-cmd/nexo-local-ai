@@ -61,3 +61,42 @@ test('persiste plano, pausa para aprovação e retoma até validar', async () =>
     await rm(directory, { recursive: true, force: true });
   }
 });
+
+test('DAG executa nós independentes em paralelo e espera dependências', async () => {
+  const directory = await mkdtemp(join(tmpdir(), 'nexo-dag-test-')); const database = createDatabase(directory);
+  let active = 0; let maximumConcurrency = 0; const completed = new Set();
+  const registry = createToolRegistry([{
+    name: 'parallel.read', description: 'leitura controlada', risk: 'read', schema: {},
+    execute: async input => {
+      active += 1; maximumConcurrency = Math.max(maximumConcurrency, active);
+      await new Promise(resolve => setTimeout(resolve, input.delay || 5)); active -= 1; completed.add(input.id); return { id: input.id };
+    },
+  }]);
+  const planner = {
+    async createPlan() {
+      return [
+        { id: 'a', title: 'A', description: 'A', status: 'pending', dependencies: [] },
+        { id: 'b', title: 'B', description: 'B', status: 'pending', dependencies: [] },
+        { id: 'c', title: 'C', description: 'C', status: 'pending', dependencies: [] },
+        { id: 'd', title: 'D', description: 'D', status: 'pending', dependencies: ['a', 'b', 'c'] },
+      ];
+    },
+    async selectAction({ step }) {
+      if (step.id === 'd') assert.deepEqual([...completed].sort((left, right) => left.localeCompare(right)), ['a', 'b', 'c']);
+      return { tool: 'parallel.read', input: { id: step.id, delay: step.id === 'd' ? 1 : 60 }, reason: 'teste DAG', successCriteria: 'concluído' };
+    },
+    async replan() { return []; },
+  };
+  const logger = { info: async () => {}, warn: async () => {}, error: async () => {} }; const taskGraph = createTaskGraph(database);
+  const loop = createAgentLoop({
+    config: { limits: { maxSteps: 8, maxRetries: 0, maxTaskMinutes: 5 } }, database, registry, permissionManager: createPermissionManager(database), planner,
+    executor: createExecutor({ registry, database, logger, maxOutput: 10_000 }),
+    evaluator: { evaluateTool: (_, execution) => ({ success: execution.ok, reason: 'observado' }), async summarize() { return { validated: true, verdict: 'PASS', summary: 'DAG validado.', evidence: ['A, B e C antes de D'], remainingRisks: [] }; } },
+    memory: { search: () => [], remember: () => {} }, rag: { search: () => [] }, logger, taskGraph, checkpoints: createCheckpointManager(database, taskGraph),
+  });
+  try {
+    const task = await loop.createTask('Executar grafo paralelo completo', { maxSteps: 8, maxRetries: 0 });
+    assert.equal(task.status, 'completed'); assert.equal(maximumConcurrency, 3); assert.equal(task.plan.every(step => step.status === 'completed'), true);
+    assert.ok(task.events.some(event => event.type === 'dag.parallel_batch_completed'));
+  } finally { database.db.close(); await rm(directory, { recursive: true, force: true }); }
+});

@@ -31,10 +31,6 @@ import { AgentTaskCard } from '@/components/nexo/agent-task-card';
 type Weather = { label: string; temperature: number; apparent: number; wind: number; code: number };
 type WeatherApiResponse = { current: { temperature_2m: number; apparent_temperature: number; wind_speed_10m: number; weather_code: number } };
 type GeocodingApiResponse = { results?: Array<{ name: string; admin1?: string; latitude: number; longitude: number }> };
-type WikiApiResponse = { query?: { pages?: Record<string, { title: string; extract?: string; fullurl?: string }> } };
-type OpenAlexApiResponse = { results?: Array<{ title: string; publication_year?: number; doi?: string; abstract_inverted_index?: Record<string, number[]> }> };
-type StackApiResponse = { items?: Array<{ title: string; link: string; tags?: string[]; score?: number; is_answered?: boolean }> };
-type OllamaApiResponse = { message?: { content?: string } };
 type SpeechResultEvent = { results: ArrayLike<{ 0: { transcript: string } }> };
 type LocalSpeechRecognition = {
   lang: string; interimResults: boolean; start(): void;
@@ -46,8 +42,6 @@ type SpeechWindow = Window & {
   webkitSpeechRecognition?: new () => LocalSpeechRecognition;
 };
 
-const MODEL = 'qwen2.5-coder:7b-instruct-q3_K_S';
-const FAST_MODEL = 'qwen2.5-coder:3b';
 const AGENT_URL = NEXO_AGENT_URL;
 const EFFORTS: Effort[] = ['Baixo', 'Médio', 'Alto', 'Extra alto'];
 
@@ -90,18 +84,6 @@ function hasDetailedVisual(svg: string) {
   return shapes >= 8 && organicShapes >= 3 && !(textElements > 0 && shapes < 12);
 }
 
-function imageSubjectGuide(prompt: string) {
-  const normalized = normalizeInput(prompt);
-  if (/\bmouse\b/.test(normalized) && !/\b(rato|camundongo|animal)\b/.test(normalized)) {
-    return 'O objeto é um MOUSE DE COMPUTADOR, visto de cima em perspectiva: corpo curvo ergonômico, botões esquerdo e direito separados, roda de rolagem central, detalhe lateral e sombra. Ele deve ser reconhecível sem nenhuma palavra.';
-  }
-  if (/\b(gato|gatinho)\b/.test(normalized)) return 'Desenhe um gato reconhecível com cabeça, orelhas triangulares, olhos, focinho, corpo, patas, cauda curva e sombra; não use texto.';
-  if (/\b(cachorro|cao|dog)\b/.test(normalized)) return 'Desenhe um cachorro reconhecível com cabeça, focinho, orelhas, corpo, quatro patas, cauda e sombra; não use texto.';
-  if (/\b(carro|automovel)\b/.test(normalized)) return 'Desenhe um carro reconhecível em perspectiva, com carroceria, para-brisa, janelas, faróis, rodas completas, reflexos e sombra; não use texto.';
-  if (/\b(casa|lar)\b/.test(normalized)) return 'Desenhe uma casa reconhecível com telhado, paredes, porta, janelas, profundidade, terreno e sombra; não use texto.';
-  if (/\b(celular|smartphone|telefone)\b/.test(normalized)) return 'Desenhe um smartphone reconhecível em perspectiva, com corpo, tela, câmeras, botões, reflexos e sombra; não use texto.';
-  return 'Represente visualmente o objeto ou a cena com silhueta clara, profundidade, detalhes característicos, iluminação e sombra. A imagem deve ser compreensível sem texto.';
-}
 
 function normalizeInput(value: string) {
   return value.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().trim().replace(/[?!.,]+$/g, '');
@@ -113,17 +95,7 @@ function formatDuration(milliseconds?: number) {
   return `${(milliseconds / 1000).toLocaleString('pt-BR', { minimumFractionDigits: 1, maximumFractionDigits: 1 })} s`;
 }
 
-function localClock(date = new Date()) {
-  return new Intl.DateTimeFormat('pt-BR', {
-    hour: '2-digit',
-    minute: '2-digit',
-    hour12: false,
-  }).format(date);
-}
 
-function localCalendarDate(date = new Date()) {
-  return new Intl.DateTimeFormat('pt-BR', { dateStyle: 'full' }).format(date);
-}
 
 function polishPortuguese(content: string) {
   return content
@@ -136,6 +108,7 @@ function polishPortuguese(content: string) {
     .replace(/\bSou habilidade\b/gi, 'Tenho habilidade')
     .replace(/aprendizado continuo/gi, 'aprendizado contínuo')
     .replace(/conforme você me interage/gi, 'conforme interagimos')
+    .replace(/Como vai as coisas\?/gi, 'Como vão as coisas?')
     .replace(/Se (?:você )?tiver mais alguma (?:pergunta|dúvida)[\s\S]*?sinta-se à vontade para perguntar!?/gi, 'Qual parte disso você gostaria de explorar primeiro?')
     .replace(/[ \t]+\n/g, '\n')
     .trim();
@@ -178,20 +151,7 @@ function weatherDescription(code: number) {
   return 'tempestade';
 }
 
-function restoreAbstract(index?: Record<string, number[]>) {
-  if (!index) return '';
-  return Object.entries(index)
-    .flatMap(([word, positions]) => positions.map(position => ({ word, position })))
-    .sort((a, b) => a.position - b.position)
-    .map(item => item.word)
-    .join(' ')
-    .slice(0, 1800);
-}
 
-function decodeHtml(value: string) {
-  const document = new DOMParser().parseFromString(value, 'text/html');
-  return document.documentElement.textContent ?? value;
-}
 
 function renderInline(content: string): ReactNode[] {
   const parts = content.split(/(\*\*[^*\n]+\*\*|`[^`\n]+`|\[[^\]\n]+\]\(https?:\/\/[^)\s]+\))/g);
@@ -342,7 +302,9 @@ export default function Home() {
     if (storedProfile.city) void loadWeatherByCity(storedProfile.city);
     new NexoClient().health().then(async (data: AgentHealth) => {
       setAgentOnline(true); setAgentToken(data.sessionToken); setAgentHealth(data);
-      const payload = await new NexoClient(data.sessionToken).getSession();
+      const client = new NexoClient(data.sessionToken);
+      void client.warmRuntime(storedEffort && EFFORTS.includes(storedEffort) ? storedEffort : 'Médio').catch(() => undefined);
+      const payload = await client.getSession();
       if (payload) {
         const remoteChats = payload.session?.state?.chats ?? [];
         if (remoteChats.length) {
@@ -358,13 +320,7 @@ export default function Home() {
         if (payload.session?.state?.profile) setProfile(current => ({ ...current, ...payload.session!.state!.profile }));
       }
     }).catch(() => { setAgentOnline(false); setAgentToken(''); setAgentHealth(null); });
-    const warmup = window.setTimeout(() => {
-      void fetch('http://localhost:11434/api/generate', {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ model: FAST_MODEL, prompt: '', stream: false, keep_alive: '30m' }),
-      }).catch(() => undefined);
-    }, 900);
-    return () => { window.clearInterval(timer); window.clearTimeout(warmup); };
+    return () => window.clearInterval(timer);
   }, []);
 
   useEffect(() => {
@@ -388,14 +344,6 @@ export default function Home() {
     void new NexoClient(agentToken).saveSession(nextChats, nextProfile).catch(() => undefined);
   }
 
-  function rememberExchange(question: string, answer: string) {
-    if (!agentToken || question.length + answer.length < 120) return;
-    const preference = /(eu gosto|eu prefiro|sempre|nunca|meu projeto|meu objetivo|lembre|importante para mim)/i.test(question);
-    void new NexoClient(agentToken).remember(`Usuário: ${question}\nNexo: ${answer.slice(0, 4000)}`, {
-      kind: preference ? 'user' : 'episodic', importance: preference ? 0.85 : 0.55, confidence: preference ? 0.86 : 0.65,
-      source: 'conversation', metadata: { chatId: activeChatId },
-    }).catch(() => undefined);
-  }
 
   function createChat() {
     if (activeChat && activeChat.messages.length === 0) { setMobileOpen(false); return; }
@@ -443,6 +391,14 @@ export default function Home() {
     if (profile.city) void loadWeatherByCity(profile.city);
   }
 
+  async function resetAdaptivePersonality() {
+    if (!agentToken) { setNotice('O Nexo Runtime está offline.'); return; }
+    try {
+      await new NexoClient(agentToken).resetPersonality();
+      setNotice('Adaptação aprendida apagada. A identidade-base do Nexo foi mantida.');
+    } catch (error) { setNotice(error instanceof Error ? error.message : 'Não consegui apagar a adaptação.'); }
+  }
+
   function toggleTheme() {
     const next = theme === 'dark' ? 'light' : 'dark';
     setTheme(next); localStorage.setItem('nexo-theme', next);
@@ -451,11 +407,7 @@ export default function Home() {
 
   function changeEffort(next: Effort) {
     setEffort(next); localStorage.setItem('nexo-effort', next);
-    const warmModel = next === 'Alto' || next === 'Extra alto' ? MODEL : FAST_MODEL;
-    void fetch('http://localhost:11434/api/generate', {
-      method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ model: warmModel, prompt: '', stream: false, keep_alive: '30m' }),
-    }).catch(() => undefined);
+    if (agentToken) void new NexoClient(agentToken).warmRuntime(next).catch(() => undefined);
   }
 
   async function addDocuments(event: ChangeEvent<HTMLInputElement>) {
@@ -470,31 +422,6 @@ export default function Home() {
     }
   }
 
-  async function searchKnowledge(query: string) {
-    if (!webSearch) return '';
-    const wikipedia = async () => {
-      const url = new URL('https://pt.wikipedia.org/w/api.php');
-      url.search = new URLSearchParams({ action: 'query', generator: 'search', gsrsearch: query, gsrlimit: '4', prop: 'extracts|info', exintro: '1', explaintext: '1', inprop: 'url', format: 'json', origin: '*' }).toString();
-      const response = await fetch(url); const data = await response.json() as WikiApiResponse;
-      const pages = Object.values(data.query?.pages ?? {}) as Array<{ title: string; extract?: string; fullurl?: string }>;
-      return pages.map(page => `[WIKIPEDIA · ${page.title}] ${page.extract?.slice(0, 1400) ?? ''}\nFonte: ${page.fullurl ?? ''}`).join('\n\n');
-    };
-    const openAlex = async () => {
-      const url = new URL('https://api.openalex.org/works');
-      url.search = new URLSearchParams({ search: query, 'per-page': '3', select: 'title,publication_year,doi,abstract_inverted_index' }).toString();
-      const response = await fetch(url); const data = await response.json() as OpenAlexApiResponse;
-      return (data.results ?? []).map(work => `[OPENALEX · ${work.publication_year ?? 's.d.'}] ${work.title}\n${restoreAbstract(work.abstract_inverted_index)}\nFonte: ${work.doi ?? 'OpenAlex'}`).join('\n\n');
-    };
-    const stackOverflow = async () => {
-      if (!['Programar', 'Agente'].includes(mode)) return '';
-      const url = new URL('https://api.stackexchange.com/2.3/search/advanced');
-      url.search = new URLSearchParams({ order: 'desc', sort: 'relevance', q: query, site: 'stackoverflow', pagesize: '3' }).toString();
-      const response = await fetch(url); const data = await response.json() as StackApiResponse;
-      return (data.items ?? []).map(item => `[STACK OVERFLOW · ${item.is_answered ? 'respondida' : 'em aberto'} · score ${item.score ?? 0}] ${decodeHtml(item.title)}\nTags: ${item.tags?.join(', ') ?? 'sem tags'}\nFonte: ${item.link}`).join('\n\n');
-    };
-    const results = await Promise.allSettled([wikipedia(), openAlex(), stackOverflow()]);
-    return results.map(result => result.status === 'fulfilled' ? result.value : '').filter(Boolean).join('\n\n---\n\n').slice(0, 18_000);
-  }
 
   function startVoice() {
     const speechWindow = window as SpeechWindow;
@@ -520,50 +447,6 @@ export default function Home() {
     catch { setNotice('Não consegui copiar automaticamente.'); }
   }
 
-  function quickAnswer(question: string) {
-    const normalized = normalizeInput(question);
-    if (/^(?:o+i+|ola+|iai+|e\s*a+i+|eae+|eai+|opa+|fala(?:\s+ai)?|salve|hey|hello|bom dia|boa tarde|boa noite)(?:\s+nexo+)?$/.test(normalized)) {
-      return `E aí${profile.name ? `, **${profile.name}**` : ''}! Tô por aqui — como você tá?`;
-    }
-    if (/^(como voce esta|como vc ta|como ce ta|tudo bem|td bem|suave|beleza|blz|como vai)$/.test(normalized)) {
-      return '**Tudo certo por aqui.** E você, como está de verdade? Pode responder do seu jeito — não precisa transformar tudo em um pedido.';
-    }
-    if (/^(obrigado|obrigada|valeu|vlw|agradecido|tmj)$/.test(normalized)) return 'Tamo junto! O que mais está passando pela sua cabeça?';
-    if (/^(tchau|ate mais|falou|flw|boa noite entao)$/.test(normalized)) return 'Até mais! Gostei da conversa. Quando voltar, a gente continua de onde parou.';
-    if (/^(?:k+k+|ha(?:ha)+|rs+)$/.test(normalized)) return 'Hahaha 😄 Essa foi boa. O que aconteceu?';
-    if (/^(teste|testando|ta funcionando|esta funcionando)$/.test(normalized)) return '**Funcionando e respondendo na hora.** Pode mandar algo mais interessante agora 😄';
-    if (/(quero conversar|vamos conversar|bora conversar|so conversar|to entediado|estou entediado)/.test(normalized)) {
-      return `Claro${profile.name ? `, **${profile.name}**` : ''}. Você não precisa chegar com uma pergunta pronta. Como foi seu dia — teve algo bom, estranho ou cansativo que ficou na cabeça?`;
-    }
-    if (/(nao sei o que fazer|estou perdido|to perdido|nao sei por onde comecar)/.test(normalized)) {
-      return 'Tudo bem não ter isso organizado ainda. Me conte a situação como vier, mesmo pela metade, e eu ajudo a transformar em um próximo passo. O que está pesando mais agora?';
-    }
-    if (question.length > 120) return null;
-    const asksOnlyForTime = /(que horas|qual.*horario|horas agora|hora agora|me diga.*hora)/.test(normalized)
-      || /(?:(?:apenas|so|somente).*(?:hora|horario)|(?:perguntei|pedi|quero).*(?:hora|horario)|(?:hora|horario).*(?:apenas|so|somente))/.test(normalized);
-    if (asksOnlyForTime) return `Agora são **${localClock()}**.`;
-    if (/(data de hoje|que dia e hoje|qual.*data|dia de hoje)/.test(normalized)) {
-      return `Hoje é **${localCalendarDate()}**.`;
-    }
-    if (/(clima|tempo hoje|temperatura|previsao do tempo)/.test(normalized)) {
-      return weather
-        ? `## Clima em ${weather.label}\n\n- **Temperatura:** ${weather.temperature}°C\n- **Sensação:** ${weather.apparent}°C\n- **Condição:** ${weatherDescription(weather.code)}\n- **Vento:** ${weather.wind} km/h`
-        : 'Ainda não tenho uma localização definida. Abra **Meu perfil**, informe sua cidade ou use **Usar localização**.';
-    }
-    if (/(consegue|pode|sabe).*(gerar|criar|fazer).*(imagem|desenho|logo|icone)/.test(normalized)) {
-      return '## Sim, consigo criar imagens\n\nGero **imagens vetoriais simples em SVG**, totalmente neste computador e sem cobrança por tokens. Podemos construir uma juntos: você prefere começar por um personagem, um objeto, um logo ou uma cena simples?';
-    }
-    if (/(o que voce faz|o que consegue fazer|oq.*(tu|voce)?.*(sabe|consegue).*fazer|que.*(tu|voce).*sabe fazer|suas capacidades|quem e voce)/.test(normalized)) {
-      return '## O que eu sei fazer\n\n- **Conversar e pensar junto:** você pode trazer uma dúvida, uma ideia incompleta ou simplesmente contar como está.\n- **Programar:** investigo repositórios, crio e reviso código, sites, APIs e serviços locais, executo validações e apresento evidências.\n- **Pesquisar:** comparo Wikipedia, OpenAlex e Stack Overflow, abro fontes e mantenho URLs e trechos usados.\n- **Navegar:** abro páginas em sessões seguras, sigo links observados e posso gerar screenshots locais.\n- **Documentos e dados:** indexo arquivos no RAG, redijo conteúdo e gero CSV para baixar.\n- **Skills e MCP:** uso especializações locais e posso conectar servidores MCP que você configurar.\n- **Tarefas autônomas:** planejo, peço permissões, tento alternativas, salvo checkpoints e posso agendar trabalhos em segundo plano.\n- **Imagens:** crio ilustrações vetoriais simples em SVG.\n\nNão precisa falar comigo como se estivesse dando comandos. O que você tem vontade de explorar agora?';
-    }
-    const math = normalized.match(/^(?:quanto e|calcule|resultado de)?\s*(-?\d+(?:[.,]\d+)?)\s*([+\-*/x])\s*(-?\d+(?:[.,]\d+)?)$/);
-    if (math) {
-      const left = Number(math[1].replace(',', '.')); const right = Number(math[3].replace(',', '.'));
-      const result = math[2] === '+' ? left + right : math[2] === '-' ? left - right : math[2] === '*' || math[2] === 'x' ? left * right : right === 0 ? NaN : left / right;
-      return Number.isFinite(result) ? `**Resultado:** ${result.toLocaleString('pt-BR', { maximumFractionDigits: 10 })}` : 'Não é possível dividir por zero.';
-    }
-    return null;
-  }
 
   function openGoogleSearch() {
     const query = prompt.trim();
@@ -656,143 +539,53 @@ export default function Home() {
     persistChats([pendingChat, ...chats.filter(chat => chat.id !== baseChat.id)]); setActiveChatId(baseChat.id);
 
     try {
-      if (mode === 'Agente') {
-        if (!agentOnline || !agentToken) throw new Error('O agente local está offline. Inicie o Nexo novamente.');
-        setActivityLabel('Planejando e executando a tarefa local…');
-        const task = await new NexoClient(agentToken).createTask(question, { maxSteps: effort === 'Baixo' ? 6 : effort === 'Médio' ? 10 : 14, maxRetries: effort === 'Baixo' ? 1 : 2 });
-        const elapsedMs = performance.now() - requestStarted;
-        const completeChat = { ...pendingChat, messages: [...pendingChat.messages, { role: 'assistant' as const, content: JSON.stringify(task), kind: 'task' as const, elapsedMs, firstTokenMs: elapsedMs, effort, model: 'Nexo Core' }], updatedAt: Date.now() };
+      if (!agentOnline || !agentToken) throw new Error('O Nexo Runtime está offline. Inicie o Nexo novamente.');
+      const effectiveModeV3 = mode === 'Imagens' || isImageCreationRequest(question, baseChat.messages) ? 'Imagens' : mode;
+      const displayStreamingV3 = !['Imagens', 'Planilhas'].includes(effectiveModeV3);
+      let responseTextV3 = ''; let firstTokenV3: number | undefined; let modelLabelV3 = 'Nexo Runtime V3';
+      const immediate = await new NexoClient(agentToken).streamChat({
+        question, mode: effectiveModeV3, effort, profile, history: baseChat.messages, documents, webSearch,
+        weather: weather ? { ...weather, description: weatherDescription(weather.code) } : null,
+      }, event => {
+        if (event.type === 'meta') {
+          modelLabelV3 = event.model;
+          setActivityLabel(event.route === 'fast' ? 'Respondendo pelo caminho rápido…' : 'Analisando com contexto progressivo…');
+          return;
+        }
+        if (event.type === 'token') {
+          if (firstTokenV3 === undefined) firstTokenV3 = performance.now() - requestStarted;
+          responseTextV3 += event.content;
+          if (displayStreamingV3) {
+            const visible = responseTextV3;
+            setChats(current => current.map(chat => chat.id === baseChat.id ? { ...pendingChat, messages: [...pendingChat.messages, { role: 'assistant', content: visible, kind: 'text', firstTokenMs: firstTokenV3, effort, model: modelLabelV3 }], updatedAt: Date.now() } : chat));
+          }
+          return;
+        }
+        if (event.type === 'done') { responseTextV3 = event.content; modelLabelV3 = event.model; }
+      });
+      if (immediate?.kind === 'task') {
+        const elapsedMs = performance.now() - requestStarted; const task = immediate.task;
+        const completeChat = { ...pendingChat, messages: [...pendingChat.messages, { role: 'assistant' as const, content: JSON.stringify(task), kind: 'task' as const, elapsedMs, firstTokenMs: elapsedMs, effort, model: 'Nexo Agent' }], updatedAt: Date.now() };
         persistChats([completeChat, ...chats.filter(chat => chat.id !== baseChat.id)]);
-        setNotice(task.status === 'awaiting_approval' ? 'O agente preparou o próximo passo e aguarda sua aprovação.' : `Tarefa: ${taskStatusLabel(task.status)}.`);
+        setNotice(task.status === 'awaiting_approval' ? 'O agente aguarda sua aprovação.' : `Tarefa: ${taskStatusLabel(task.status)}.`);
         return;
       }
-      const instant = quickAnswer(question);
-      if (instant) {
+      if (immediate?.kind === 'instant') {
         const elapsedMs = performance.now() - requestStarted;
-        const completeChat = { ...pendingChat, messages: [...pendingChat.messages, { role: 'assistant' as const, content: instant, kind: 'text' as const, elapsedMs, firstTokenMs: elapsedMs, effort, model: 'Resposta rápida' }], updatedAt: Date.now() };
-        persistChats([completeChat, ...chats.filter(chat => chat.id !== baseChat.id)]); rememberExchange(question, instant); speak(instant); return;
+        const completeChat = { ...pendingChat, messages: [...pendingChat.messages, { role: 'assistant' as const, content: immediate.content, kind: 'text' as const, elapsedMs, firstTokenMs: elapsedMs, effort, model: 'Nexo Instant' }], updatedAt: Date.now() };
+        persistChats([completeChat, ...chats.filter(chat => chat.id !== baseChat.id)]); speak(immediate.content); return;
       }
-      const effectiveMode = mode === 'Imagens' || isImageCreationRequest(question, baseChat.messages) ? 'Imagens' : mode;
-      const normalizedImageQuestion = normalizeInput(question);
-      const hasInstantImageTemplate = /\b(note|notebook|laptop|computador)\b/.test(normalizedImageQuestion)
-        || (/\bmouse\b/.test(normalizedImageQuestion) && !/\b(rato|camundongo|animal)\b/.test(normalizedImageQuestion));
-      if (effectiveMode === 'Imagens' && hasInstantImageTemplate) {
-        const elapsedMs = performance.now() - requestStarted;
-        const completeChat = { ...pendingChat, messages: [...pendingChat.messages, { role: 'assistant' as const, content: fallbackSvg(question), kind: 'image' as const, elapsedMs, firstTokenMs: elapsedMs, effort, model: 'Gerador SVG', sourcePrompt: question }], updatedAt: Date.now() };
-        persistChats([completeChat, ...chats.filter(chat => chat.id !== baseChat.id)]); return;
+      responseTextV3 = responseTextV3.trim(); if (!responseTextV3) throw new Error('O Runtime V3 não produziu uma resposta.');
+      if (effectiveModeV3 === 'Imagens') {
+        const candidate = cleanSvg(responseTextV3); responseTextV3 = hasDetailedVisual(candidate) ? candidate : fallbackSvg(question);
       }
-      const onlineContext = await searchKnowledge(question);
-      const documentContext = documents.map(doc => `ARQUIVO ${doc.name}:\n${doc.content}`).join('\n\n');
-      const modeInstruction = effectiveMode === 'Planilhas'
-        ? 'Crie CSV válido com cabeçalhos claros e ponto e vírgula como separador. Responda somente o CSV.'
-        : effectiveMode === 'Imagens'
-          ? `Crie uma imagem vetorial bonita, reconhecível e bem composta em SVG, com viewBox="0 0 1024 1024". ${imageSubjectGuide(question)} Use no mínimo 10 formas visuais relevantes entre path, circle, ellipse, rect e polygon, com profundidade, detalhes e composição central. É PROIBIDO substituir o desenho por uma palavra, legenda, janela, cartão ou retângulo genérico. Não use elemento <text>, scripts nem imagens externas. Responda SOMENTE com o SVG completo, iniciando em <svg e terminando em </svg>. Interprete português informal pelo contexto: em um pedido de imagem, “note” significa notebook/laptop, salvo se o usuário disser anotação.`
-          : effectiveMode === 'Agente'
-            ? 'Você pode propor UMA ferramenta por resposta e deve responder SOMENTE JSON. Formato base: {"nexo_action":{"type":"TIPO","path":"caminho/relativo","reason":"explicação curta"}}. Tipos permitidos: read_file para ler texto; list_files para listar pasta; write_file com content completo; create_folder; create_project com template static-site, node-api, python-api ou ai-service. Ao criar um site, API, servidor ou serviço de IA novo, prefira create_project. Depois use read_file/write_file em passos separados para personalizar. Nunca proponha exclusões, terminal, comandos, caminhos absolutos, registro, configurações do sistema, instalação ou mudanças de VPN. Toda escrita e criação exigem aprovação humana.'
-            : '';
-      const weatherContext = weather
-        ? `${weather.label}: ${weather.temperature}°C, sensação ${weather.apparent}°C, ${weatherDescription(weather.code)}, vento ${weather.wind} km/h.`
-        : 'Clima indisponível. Explique que o usuário pode definir sua cidade no perfil; não diga que você nunca possui acesso ao clima.';
-      const lightRequest = effectiveMode === 'Geral' && !documents.length && !onlineContext && question.length < 240;
-      const useFastModel = effort === 'Baixo' || (effort === 'Médio' && lightRequest);
-      const selectedModel = useFastModel ? FAST_MODEL : MODEL;
-      let selectedModelLabel = useFastModel ? 'Qwen 3B' : 'Qwen 7B';
-      const isStructured = ['Imagens', 'Planilhas', 'Agente'].includes(effectiveMode);
-      const displayStreaming = !isStructured;
-      const numContext = effort === 'Baixo' ? 3072 : effort === 'Médio' ? documents.length || onlineContext ? 6144 : 4096 : effort === 'Alto' ? 6144 : 8192;
-      const numPredict = effectiveMode === 'Imagens'
-        ? effort === 'Baixo' ? 1050 : effort === 'Médio' ? 1500 : effort === 'Alto' ? 1900 : 2400
-        : effectiveMode === 'Programar' || effectiveMode === 'Agente'
-          ? effort === 'Baixo' ? 750 : effort === 'Médio' ? 1300 : effort === 'Alto' ? 1800 : 2400
-          : question.length < 120
-            ? effort === 'Baixo' ? 120 : effort === 'Médio' ? 220 : effort === 'Alto' ? 480 : 800
-            : effort === 'Baixo' ? 300 : effort === 'Médio' ? 600 : effort === 'Alto' ? 1100 : 1700;
-      const effortInstruction = effort === 'Baixo'
-        ? 'Seja muito direto e econômico. Priorize velocidade e responda apenas o necessário.'
-        : effort === 'Médio'
-          ? 'Equilibre velocidade, clareza e profundidade.'
-          : effort === 'Alto'
-            ? 'Analise cuidadosamente, confira coerência e inclua detalhes úteis.'
-            : 'Faça uma análise profunda e uma revisão rigorosa antes de concluir. Cubra casos importantes sem repetição.';
-
-      const response = await fetch('http://localhost:11434/api/chat', {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          model: selectedModel, stream: true, keep_alive: '30m',
-          options: {
-            temperature: isStructured ? 0.18 : useFastModel ? 0.22 : 0.38,
-            top_p: 0.9, repeat_penalty: 1.12,
-            num_ctx: numContext,
-            num_predict: numPredict,
-          },
-          messages: [
-            { role: 'system', content: `Você é Nexo, o parceiro pessoal local de ${profile.name || 'seu usuário'}. Você não é apenas um executor de comandos: conversa, pensa junto e ajuda a pessoa a desenvolver ideias. Adapte vocabulário, profundidade, humor leve e exemplos ao jeito do usuário. Estilo preferido: ${profile.style}. Instruções: ${profile.instructions || 'Nenhuma'}. Use o histórico para manter continuidade e perceber interesses, preferências e o momento da conversa.\n\nPERSONALIDADE E CONVERSA:\n- Fale como um parceiro inteligente, caloroso, curioso e seguro, nunca como um manual ou atendente automático.\n- Primeiro reconheça a intenção ou o sentimento por trás da mensagem; depois ajude. Em tarefas objetivas, vá direto sem perder o tom humano.\n- Quando for natural, ofereça uma ideia complementar ou faça UMA pergunta relevante que mova a conversa adiante. Não termine toda resposta com “se quiser, posso ajudar” e não interrogue o usuário.\n- Aceite pensamentos incompletos, gírias e mensagens curtas. Ajude a dar forma à ideia em vez de exigir um comando perfeito.\n- Use o nome ${profile.name || 'do usuário'} com moderação, em momentos acolhedores, não em toda resposta.\n- Não alegue ter corpo, sentimentos ou experiências humanas. Ainda assim, pode demonstrar atenção, leveza e interesse pela conversa.\n\nEXEMPLOS DE TOM:\nUsuário: “tô meio perdido hoje”\nNexo: “Tudo bem não ter as coisas organizadas agora. Me conta o que está mais pesado, mesmo que venha pela metade, e a gente encontra um primeiro passo.”\nUsuário: “me explica isso”\nNexo: responda de forma clara e depois faça uma pergunta ligada ao contexto, como “Onde você encontrou isso?” ou “Quer entender a ideia ou aplicar em algo?”.\n\nESFORÇO ${effort.toUpperCase()}: ${effortInstruction}\n\nCAPACIDADES REAIS DO NEXO:\n- Conversa, programação, documentos, planilhas CSV, pesquisa opcional e ações locais protegidas.\n- Gera imagens vetoriais simples em SVG localmente. Nunca diga que não consegue criar imagens; quando solicitado, siga o modo Imagens.\n\nREGRAS DE QUALIDADE:\n- Responda sempre em português brasileiro correto, natural e coerente. Não use construções como “posso respondo”, “sou capacidade” ou “como posso eu ajudar”. Revise concordância, regência e acentuação antes de concluir.\n- Comece pela resposta direta. Não repita a pergunta e não acrescente fatos irrelevantes.\n- Não invente dados, fontes, recursos ou capacidades. Se não souber, diga claramente.\n- Siga literalmente os limites e o formato pedidos pelo usuário, inclusive quantidade de frases, tópicos ou exemplos.\n- Em perguntas simples, use de 2 a 5 frases, salvo se o usuário pedir outra quantidade. Em temas complexos, explique com profundidade e exemplos concretos.\n- Para respostas textuais, use Markdown limpo: títulos ## apenas quando ajudarem, listas para etapas ou comparações, **negrito** para pontos-chave e blocos de código com a linguagem correta. Não use HTML.\n- Quando houver PESQUISA ONLINE, diferencie fatos encontrados de inferências e cite o nome ou link da fonte relevante.\n\nModo: ${effectiveMode}. Data e hora: ${currentTime}. Clima: ${weatherContext}\n${modeInstruction}\n\nDOCUMENTOS:\n${documentContext || 'Nenhum'}\n\nPESQUISA ONLINE:\n${onlineContext || 'Desativada ou sem resultados'}` },
-            ...baseChat.messages.slice(-14), userMessage,
-          ],
-        }),
-      });
-      if (!response.ok) throw new Error('ollama');
-      if (!response.body) throw new Error('stream');
-      const reader = response.body.getReader(); const decoder = new TextDecoder();
-      let buffer = ''; let responseText = ''; let firstTokenMs: number | undefined;
-      const streamingChat = { ...pendingChat, messages: [...pendingChat.messages, { role: 'assistant' as const, content: '', kind: 'text' as const, effort, model: selectedModelLabel }], updatedAt: Date.now() };
-      if (displayStreaming) setChats(current => [streamingChat, ...current.filter(chat => chat.id !== baseChat.id)]);
-      while (true) {
-        const { value, done } = await reader.read();
-        if (done) break;
-        buffer += decoder.decode(value, { stream: true });
-        const lines = buffer.split('\n'); buffer = lines.pop() ?? '';
-        for (const line of lines) {
-          if (!line.trim()) continue;
-          const data = JSON.parse(line) as OllamaApiResponse;
-          const chunk = data.message?.content ?? '';
-          if (chunk && firstTokenMs === undefined) firstTokenMs = performance.now() - requestStarted;
-          responseText += chunk;
-        }
-        if (displayStreaming) {
-          const visibleText = responseText;
-          setChats(current => current.map(chat => chat.id === baseChat.id ? { ...streamingChat, messages: [...pendingChat.messages, { role: 'assistant', content: visibleText, kind: 'text', firstTokenMs, effort, model: selectedModelLabel }] } : chat));
-        }
-      }
-      if (buffer.trim()) {
-        const data = JSON.parse(buffer) as OllamaApiResponse;
-        const chunk = data.message?.content ?? '';
-        if (chunk && firstTokenMs === undefined) firstTokenMs = performance.now() - requestStarted;
-        responseText += chunk;
-      }
-      responseText = responseText.trim();
-      if (!responseText) throw new Error('empty');
-      if (effectiveMode === 'Imagens') {
-        let candidate = cleanSvg(responseText);
-        if (!hasDetailedVisual(candidate)) {
-          setActivityLabel('Refinando os detalhes da imagem…');
-          const retryModel = effort === 'Baixo' ? FAST_MODEL : MODEL;
-          const retry = await fetch('http://localhost:11434/api/chat', {
-            method: 'POST', headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              model: retryModel, stream: false, keep_alive: '30m',
-              options: { temperature: 0.16, top_p: 0.86, repeat_penalty: 1.1, num_ctx: 4096, num_predict: effort === 'Baixo' ? 1200 : 1900 },
-              messages: [
-                { role: 'system', content: 'Você é um ilustrador SVG. Entregue somente SVG 1024x1024 seguro e completo. Desenhe o objeto de forma reconhecível usando pelo menos 12 formas, silhueta clara, detalhes, luz e sombra. Não use texto, legenda, janela, cartão ou imagem externa.' },
-                { role: 'user', content: `O primeiro desenho ficou genérico e foi rejeitado. Refaça do zero: ${question}. ${imageSubjectGuide(question)}` },
-              ],
-            }),
-          });
-          if (retry.ok) {
-            const retryData = await retry.json() as OllamaApiResponse;
-            const refined = cleanSvg(retryData.message?.content ?? '');
-            if (hasDetailedVisual(refined)) { candidate = refined; selectedModelLabel = `${retryModel === MODEL ? 'Qwen 7B' : 'Qwen 3B'} · revisado`; }
-          }
-        }
-        responseText = hasDetailedVisual(candidate) ? candidate : fallbackSvg(question);
-      }
-      const proposedAction = effectiveMode === 'Agente' ? parseAction(responseText) : null;
-      const kind: MessageKind = effectiveMode === 'Planilhas' ? 'sheet' : effectiveMode === 'Imagens' ? 'image' : proposedAction ? 'action' : 'text';
-      if (kind === 'text') responseText = polishPortuguese(responseText);
-      const elapsedMs = performance.now() - requestStarted;
-      const completeChat = { ...pendingChat, messages: [...pendingChat.messages, { role: 'assistant' as const, content: responseText, kind, elapsedMs, firstTokenMs: firstTokenMs ?? elapsedMs, effort, model: selectedModelLabel, sourcePrompt: kind === 'image' ? question : undefined }], updatedAt: Date.now() };
-      persistChats([completeChat, ...chats.filter(chat => chat.id !== baseChat.id)]);
-      if (kind === 'text') { rememberExchange(question, responseText); speak(responseText); }
+      const kindV3: MessageKind = effectiveModeV3 === 'Planilhas' ? 'sheet' : effectiveModeV3 === 'Imagens' ? 'image' : 'text';
+      if (kindV3 === 'text') responseTextV3 = polishPortuguese(responseTextV3);
+      const elapsedMsV3 = performance.now() - requestStarted;
+      const completeChatV3 = { ...pendingChat, messages: [...pendingChat.messages, { role: 'assistant' as const, content: responseTextV3, kind: kindV3, elapsedMs: elapsedMsV3, firstTokenMs: firstTokenV3 ?? elapsedMsV3, effort, model: modelLabelV3, sourcePrompt: kindV3 === 'image' ? question : undefined }], updatedAt: Date.now() };
+      persistChats([completeChatV3, ...chats.filter(chat => chat.id !== baseChat.id)]);
+      if (kindV3 === 'text') speak(responseTextV3);
+      return;
     } catch (error) {
       setNotice(error instanceof Error ? error.message : 'Não consegui acessar o modelo local. Confirme se o Ollama está aberto e tente novamente.');
     } finally { setLoading(false); }
@@ -939,7 +732,8 @@ export default function Home() {
           <div className="grid gap-1.5"><label htmlFor="profile-style" className="text-xs font-medium">Estilo de resposta</label><Input id="profile-style" value={profile.style} onChange={event => setProfile(current => ({ ...current, style: event.target.value }))} placeholder="Direto, detalhado, descontraído…" /></div>
           <div className="grid gap-1.5"><label htmlFor="profile-instructions" className="text-xs font-medium">Instruções pessoais</label><Textarea id="profile-instructions" value={profile.instructions} onChange={event => setProfile(current => ({ ...current, instructions: event.target.value }))} placeholder="Ex.: explique código para iniciantes e responda em português." className="min-h-24" /></div>
         </div>
-        <DialogFooter><Button onClick={saveProfile}>Salvar perfil</Button></DialogFooter>
+        <div className="rounded-xl border border-border bg-muted/30 p-3"><p className="text-xs font-medium">Personalidade adaptativa</p><p className="mt-1 text-[11px] leading-5 text-muted-foreground">O Nexo aprende gradualmente seu nível de formalidade, humor, iniciativa e tamanho preferido de resposta. Você pode apagar somente essa adaptação quando quiser.</p></div>
+        <DialogFooter className="justify-between sm:justify-between"><Button variant="ghost" onClick={() => void resetAdaptivePersonality()}>Apagar adaptação</Button><Button onClick={saveProfile}>Salvar perfil</Button></DialogFooter>
       </DialogContent>
     </Dialog>
 

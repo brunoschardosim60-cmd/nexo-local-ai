@@ -33,7 +33,7 @@ class StdioConnection {
       let message; try { message = JSON.parse(line); } catch { continue; }
       if (message.id == null || !this.pending.has(String(message.id))) continue;
       const pending = this.pending.get(String(message.id)); this.pending.delete(String(message.id)); clearTimeout(pending.timer);
-      message.error ? pending.reject(new Error(message.error.message || 'Erro MCP.')) : pending.resolve(message.result);
+      if (message.error) pending.reject(new Error(message.error.message || 'Erro MCP.')); else pending.resolve(message.result);
     }
   }
   rejectAll(error) { for (const pending of this.pending.values()) { clearTimeout(pending.timer); pending.reject(error); } this.pending.clear(); this.child = null; this.initialized = false; }

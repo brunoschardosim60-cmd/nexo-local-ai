@@ -8,6 +8,8 @@ const ALLOWED = {
   node: new Set(['--check']),
   rg: null,
 };
+const FORBIDDEN_OPTIONS = new Set(['--pre', '--pre-glob', '--ext-diff', '--textconv', '--exec', '-exec']);
+const MAX_ARGUMENTS = 120; const MAX_ARGUMENT_LENGTH = 4_000;
 
 function safeCwd(workspace, input = '.') {
   const target = resolve(workspace, input);
@@ -18,9 +20,16 @@ function safeCwd(workspace, input = '.') {
 function validateCommand(command, args) {
   const base = String(command || '').toLowerCase().replace(/\.cmd$/i, '');
   if (!(base in ALLOWED)) throw new Error(`Comando não permitido: ${command}`);
+  if (!Array.isArray(args) || args.length > MAX_ARGUMENTS) throw new Error('Quantidade de argumentos não permitida.');
   const allowedFirst = ALLOWED[base];
   if (allowedFirst && !allowedFirst.has(String(args[0] || ''))) throw new Error(`Subcomando não permitido: ${base} ${args[0] || ''}`);
-  if (args.some(argument => /[;&|><`\r\n]/.test(String(argument)))) throw new Error('Caracteres de shell não são permitidos.');
+  for (const argument of args) {
+    const value = String(argument); const option = value.split('=', 1)[0];
+    if (value.length > MAX_ARGUMENT_LENGTH) throw new Error('Argumento grande demais.');
+    if (/[;&|><`\r\n]/.test(value) || value.includes(String.fromCharCode(0))) throw new Error('Caracteres de shell não são permitidos.');
+    if (FORBIDDEN_OPTIONS.has(option)) throw new Error(`Opção não permitida: ${option}`);
+    if (/^(?:[a-z]:[\\/]|\\\\|\/)/i.test(value) || /(?:^|[\\/])\.\.(?:[\\/]|$)/.test(value)) throw new Error('Caminhos absolutos ou com travessia não são permitidos.');
+  }
   if (base === 'npm' && args[0] === 'run' && !['test', 'lint', 'build', 'typecheck'].includes(String(args[1] || ''))) throw new Error('Script npm não permitido.');
   return base;
 }
@@ -31,7 +40,11 @@ export function createSandbox({ workspace, timeoutMs = 120_000, maxOutput = 24_0
       const base = validateCommand(command, args);
       const executable = process.platform === 'win32' && ['npm', 'npx'].includes(base) ? `${base}.cmd` : base;
       const workingDirectory = safeCwd(workspace, cwd);
-      const safeEnv = { PATH: process.env.PATH, SystemRoot: process.env.SystemRoot, TEMP: process.env.TEMP, TMP: process.env.TMP, NODE_ENV: 'test', NO_COLOR: '1' };
+      const safeEnv = {
+        PATH: process.env.PATH, SystemRoot: process.env.SystemRoot, TEMP: process.env.TEMP, TMP: process.env.TMP,
+        NODE_ENV: 'test', NO_COLOR: '1', CI: '1', npm_config_ignore_scripts: 'true', npm_config_audit: 'false', npm_config_fund: 'false',
+        GIT_EXTERNAL_DIFF: '', GIT_CONFIG_NOSYSTEM: '1', RIPGREP_CONFIG_PATH: '',
+      };
       return new Promise((resolvePromise, reject) => {
         const startedAt = performance.now(); let stdout = ''; let stderr = ''; let timedOut = false;
         const child = spawn(executable, args.map(String), { cwd: workingDirectory, env: safeEnv, shell: false, windowsHide: true });

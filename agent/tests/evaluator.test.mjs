@@ -19,6 +19,7 @@ test('o resumo final usa os caminhos realmente observados', async () => {
   }]);
 
   assert.equal(result.validated, true);
+  assert.equal(result.verdict, 'PASS');
   assert.match(result.summary, /orchestrator, memory, tools/);
   assert.doesNotMatch(result.summary, /agent\.js|config\.json|utils/);
   assert.deepEqual(result.evidence, [
@@ -35,5 +36,16 @@ test('uma edição sem teste permanece com alerta', async () => {
   }]);
 
   assert.equal(result.validated, false);
+  assert.equal(result.verdict, 'UNCERTAIN');
   assert.equal(result.remainingRisks.length, 1);
+});
+
+test('uma promessa de correção sem alteração observada falha', async () => {
+  const evaluator = createEvaluator();
+  const result = await evaluator.summarize({ ...completedTask, objective: 'Corrija o arquivo quebrado.' }, [{
+    tool: 'filesystem.read', status: 'completed', output: { path: 'app/page.tsx', content: 'conteúdo' },
+  }]);
+  assert.equal(result.verdict, 'FAIL');
+  assert.equal(result.validated, false);
+  assert.ok(result.acceptanceCriteria.some(item => !item.met));
 });

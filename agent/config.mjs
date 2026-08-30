@@ -16,7 +16,7 @@ export function createAgentConfig(overrides = {}) {
       contextTokens: 6_000,
       maxTaskMinutes: 20,
       commandTimeoutMs: 120_000,
-      ...(overrides.limits || {}),
+      ...overrides.limits,
     },
   };
 }

@@ -13,6 +13,19 @@ function corsHeaders() {
   return { 'Access-Control-Allow-Origin': ALLOWED_ORIGIN, 'Access-Control-Allow-Headers': 'Content-Type, X-Nexo-Token', 'Access-Control-Allow-Methods': 'GET,POST,OPTIONS', 'Cache-Control': 'no-store', Vary: 'Origin' };
 }
 function send(response, status, data) { response.writeHead(status, { 'Content-Type': 'application/json; charset=utf-8', ...corsHeaders() }); response.end(status === 204 ? undefined : JSON.stringify(data)); }
+async function streamRuntime(request, response, prepared) {
+  const controller = new AbortController(); request.once('aborted', () => controller.abort());
+  response.once('close', () => { if (!response.writableEnded) controller.abort(); });
+  response.writeHead(200, { 'Content-Type': 'application/x-ndjson; charset=utf-8', 'X-Accel-Buffering': 'no', ...corsHeaders() });
+  try {
+    for await (const event of core.runtime.stream(prepared, { signal: controller.signal })) {
+      if (response.destroyed) break;
+      response.write(`${JSON.stringify(event)}\n`);
+    }
+  } catch (error) {
+    if (!response.destroyed) response.write(`${JSON.stringify({ type: 'error', error: error instanceof Error ? error.message : 'Falha no Runtime V3.' })}\n`);
+  } finally { if (!response.destroyed) response.end(); }
+}
 function verifyOrigin(request) { const origin = request.headers.origin; if (origin && origin !== ALLOWED_ORIGIN) throw new Error('Origem não autorizada.'); }
 function verifySession(request) {
   verifyOrigin(request); if (request.headers['x-nexo-token'] !== SESSION_TOKEN) throw new Error('Sessão local não autorizada.');
@@ -61,6 +74,7 @@ const server = createServer(async (request, response) => {
     if (request.method === 'GET' && url.pathname === '/agent/mcp/servers') return send(response, 200, { ok: true, servers: core.mcp.servers() });
     if (request.method === 'GET' && url.pathname === '/agent/specialists') return send(response, 200, { ok: true, specialists: core.specialists.list() });
     if (request.method === 'GET' && url.pathname === '/agent/subtasks') return send(response, 200, { ok: true, subtasks: core.database.listChildTasks(url.searchParams.get('parentTaskId') || '') });
+    if (request.method === 'GET' && url.pathname === '/agent/personality') return send(response, 200, { ok: true, personality: core.personality.snapshot('casual') });
 
     const sessionMatch = url.pathname.match(/^\/agent\/sessions\/([^/]+)$/);
     if (request.method === 'GET' && sessionMatch) return send(response, 200, { ok: true, session: core.database.getSession(sessionMatch[1]) });
@@ -71,6 +85,13 @@ const server = createServer(async (request, response) => {
     if (request.method !== 'POST') return send(response, 404, { error: 'Rota não encontrada.' });
 
     const input = await readBody(request);
+    if (url.pathname === '/chat') {
+      const prepared = await core.runtime.prepare(input); audit('runtime_chat', prepared.route, true, prepared.kind);
+      if (prepared.kind === 'instant') return send(response, 200, { ok: true, ...prepared });
+      if (prepared.kind === 'task') return send(response, 202, { ok: true, ...prepared });
+      return streamRuntime(request, response, prepared);
+    }
+    if (url.pathname === '/agent/runtime/warm') return send(response, 200, { ok: true, ...(await core.runtime.warm(input.effort)) });
     if (url.pathname === '/agent/tasks') {
       const task = core.loop.enqueueTask(input.objective, { maxSteps: input.maxSteps, maxRetries: input.maxRetries }); audit('agent_task', task.id, true, task.status); return send(response, 202, { ok: true, task });
     }
@@ -89,12 +110,17 @@ const server = createServer(async (request, response) => {
     if (url.pathname === '/agent/rag/text') {
       const indexed = core.rag.indexText(input.source, input.content, input.metadata); audit('rag_text', indexed.source, true, `${indexed.chunks} chunks`); return send(response, 200, { ok: true, indexed });
     }
+    if (url.pathname === '/agent/personality/reset') {
+      if (input.confirmation !== 'RESET') throw new Error('Confirmação necessária para apagar a adaptação.');
+      const result = core.personality.reset(); core.runtime.clearCache(); audit('personality_reset', 'adaptive-style', true); return send(response, 200, { ok: true, result });
+    }
     if (sessionMatch) return send(response, 200, { ok: true, session: core.database.putSession(sessionMatch[1], input.state || {}) });
 
     const legacy = legacyRoutes[url.pathname];
     if (legacy) {
       if (legacy.risk !== 'read' && input.confirmation !== 'APPROVED') throw new Error('Aprovação obrigatória.');
-      const { confirmation, ...toolInput } = input; const result = await core.registry.execute(legacy.tool, toolInput); audit(legacy.tool, input.path || '.', true); return send(response, 200, { ok: true, result });
+      const toolInput = { ...input }; delete toolInput.confirmation;
+      const result = await core.registry.execute(legacy.tool, toolInput); audit(legacy.tool, input.path || '.', true); return send(response, 200, { ok: true, result });
     }
     return send(response, 404, { error: 'Rota não encontrada.' });
   } catch (error) {
@@ -104,7 +130,7 @@ const server = createServer(async (request, response) => {
 
 server.listen(PORT, '127.0.0.1', () => {
   console.log(`Nexo Core ativo em http://127.0.0.1:${PORT}`); console.log(`Área permitida: ${WORKSPACE}`);
-  console.log('Proteções: loopback, token, contratos, aprovação, sandbox, SSRF guard, checkpoints e auditoria.');
+  console.log('Proteções: loopback, token, contratos, aprovação, executor restrito, SSRF guard, checkpoints e auditoria.');
 });
 
 function shutdown() { server.close(() => { core.close(); process.exit(0); }); }

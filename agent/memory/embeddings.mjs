@@ -13,7 +13,7 @@ function hash(value) {
 }
 
 export function embedText(text) {
-  const vector = new Array(DIMENSIONS).fill(0);
+  const vector = Array.from({ length: DIMENSIONS }, () => 0);
   for (const token of tokens(text)) {
     const value = hash(token); const index = value % DIMENSIONS;
     vector[index] += (value & 1) === 0 ? 1 : -1;

@@ -1,4 +1,4 @@
-import type { AgentHealth, AgentTask, BackgroundJob, Chat, NexoSkill, RuntimeEvent, UserProfile } from './types';
+import type { AgentHealth, AgentTask, BackgroundJob, Chat, ChatMessage, Effort, LocalDocument, NexoSkill, RuntimeEvent, RuntimeImmediateResponse, RuntimeStreamEvent, UserProfile } from './types';
 
 export const NEXO_AGENT_URL = 'http://127.0.0.1:7331';
 
@@ -15,6 +15,26 @@ export class NexoClient {
   async getTask(taskId: string, signal?: AbortSignal) { return (await jsonResponse<{ task: AgentTask }>(await fetch(`${this.baseUrl}/agent/tasks/${taskId}`, { headers: this.headers(), signal }))).task; }
   async createTask(objective: string, options: { maxSteps: number; maxRetries: number }) {
     return (await jsonResponse<{ task: AgentTask }>(await fetch(`${this.baseUrl}/agent/tasks`, { method: 'POST', headers: this.headers(true), body: JSON.stringify({ objective, ...options }) }))).task;
+  }
+  async streamChat(input: { question: string; mode: string; effort: Effort; profile: UserProfile; history: ChatMessage[]; documents: LocalDocument[]; weather?: Record<string, unknown> | null; webSearch: boolean }, onEvent: (event: RuntimeStreamEvent) => void, signal?: AbortSignal) {
+    const response = await fetch(`${this.baseUrl}/chat`, { method: 'POST', headers: this.headers(true), body: JSON.stringify(input), signal });
+    const contentType = response.headers.get('content-type') || '';
+    if (contentType.includes('application/json')) return jsonResponse<RuntimeImmediateResponse>(response);
+    if (!response.ok) throw new Error(`Nexo Runtime respondeu ${response.status}.`);
+    if (!response.body) throw new Error('O Nexo Runtime não iniciou o streaming.');
+    const reader = response.body.getReader(); const decoder = new TextDecoder(); let buffer = '';
+    const emit = (line: string) => {
+      if (!line.trim()) return;
+      const event = JSON.parse(line) as RuntimeStreamEvent; onEvent(event);
+      if (event.type === 'error') throw new Error(event.error);
+    };
+    while (true) {
+      const { value, done } = await reader.read(); if (done) break;
+      buffer += decoder.decode(value, { stream: true }); const lines = buffer.split('\n'); buffer = lines.pop() || '';
+      for (const line of lines) emit(line);
+    }
+    if (buffer.trim()) emit(buffer);
+    return null;
   }
   async decidePermission(taskId: string, permissionId: string, decision: 'approved' | 'denied') {
     return (await jsonResponse<{ task: AgentTask }>(await fetch(`${this.baseUrl}/agent/tasks/${taskId}/permissions/${permissionId}`, { method: 'POST', headers: this.headers(true), body: JSON.stringify({ decision }) }))).task;
@@ -37,4 +57,6 @@ export class NexoClient {
   async listEvents(after = 0, limit = 100) { return (await jsonResponse<{ events: RuntimeEvent[] }>(await fetch(`${this.baseUrl}/agent/events?after=${after}&limit=${limit}`, { headers: this.headers() }))).events; }
   async listBrowserSessions() { return jsonResponse(await fetch(`${this.baseUrl}/agent/browser/sessions`, { headers: this.headers() })); }
   async listMcpServers() { return jsonResponse(await fetch(`${this.baseUrl}/agent/mcp/servers`, { headers: this.headers() })); }
+  async resetPersonality() { return jsonResponse(await fetch(`${this.baseUrl}/agent/personality/reset`, { method: 'POST', headers: this.headers(true), body: JSON.stringify({ confirmation: 'RESET' }) })); }
+  async warmRuntime(effort: Effort) { return jsonResponse(await fetch(`${this.baseUrl}/agent/runtime/warm`, { method: 'POST', headers: this.headers(true), body: JSON.stringify({ effort }) })); }
 }

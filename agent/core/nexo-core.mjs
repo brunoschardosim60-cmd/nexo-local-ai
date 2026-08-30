@@ -6,6 +6,8 @@ import { createDatabase } from '../memory/database.mjs';
 import { createLongTermMemory } from '../memory/long-term.mjs';
 import { createModelRouter } from '../models/router.mjs';
 import { createOllamaClient } from '../models/ollama.mjs';
+import { createPersonalityEngine } from '../personality/engine.mjs';
+import { createNexoRuntime } from '../runtime/nexo-runtime.mjs';
 import { createLogger } from '../observability/logger.mjs';
 import { createEventBus } from '../events/event-bus.mjs';
 import { createMcpManager } from '../mcp/client.mjs';
@@ -45,25 +47,26 @@ export function createNexoCore(overrides = {}) {
     ...filesystem.definitions, ...createProjectTools(filesystem), ...createGitTools(sandbox), ...createTerminalTools(sandbox), ...repository.tools,
     ...research.definitions, ...browser.definitions, ...coding.definitions, ...skills.definitions, ...mcp.definitions, ...scheduler.definitions, ...coordinator.definitions,
   ]);
-  const permissionManager = createPermissionManager(database); const memory = createLongTermMemory(database);
+  const permissionManager = createPermissionManager(database); const memory = createLongTermMemory(database); const personality = createPersonalityEngine(database);
   const rag = createRag({ database, workspace: config.workspace, filesystem }); const router = createModelRouter(config); const ollama = createOllamaClient(config);
   const contextEngine = createContextEngine({ memory, rag, repository, skills, maxTokens: config.limits.contextTokens || 6000 });
   const planner = createPlanner({ ollama, router, specialists }); const executor = createExecutor({ registry, database, logger, maxOutput: config.limits.maxToolOutput });
-  const evaluator = createEvaluator({ ollama, router }); const taskGraph = createTaskGraph(database); const checkpoints = createCheckpointManager(database, taskGraph);
+  const evaluator = createEvaluator(); const taskGraph = createTaskGraph(database); const checkpoints = createCheckpointManager(database, taskGraph);
   const loop = createAgentLoop({ config, database, registry, permissionManager, planner, executor, evaluator, memory, rag, logger, taskGraph, checkpoints, contextEngine, eventBus });
+  const runtime = createNexoRuntime({ config, memory, rag, ollama, research, loop, personality, eventBus });
   scheduler.setExecutor(objective => loop.enqueueTask(objective));
   coordinator.setLoop(loop);
   const resumedTasks = overrides.autoResume === false ? 0 : loop.resumeInterrupted();
 
   return {
-    version: '2.0.0', config, database, registry, memory, rag, router, loop, repository, contextEngine, taskGraph, checkpoints,
+    version: '3.0.0', config, database, registry, memory, rag, router, loop, runtime, personality, repository, contextEngine, taskGraph, checkpoints,
     research, browser, coding, skills, specialists, coordinator, mcp, scheduler, eventBus,
     health() {
       const tasks = database.listTasks(100);
       return {
-        runtime: 'Nexo Core', version: '2.0.0', persistent: true, database: 'SQLite local', tools: registry.describe(), models: router.capabilities(),
+        runtime: 'Nexo Core', version: '3.0.0', persistent: true, database: 'SQLite local', tools: registry.describe(), models: router.capabilities(),
         taskGraph: true, checkpoints: true, contextEngine: true, repositoryIntelligence: true, resumedTasks,
-        capabilities: { research: research.health(), browser: browser.health(), coding: coding.health(), skills: skills.health(), specialists: specialists.list(), multiAgent: coordinator.health(), mcp: mcp.health(), background: scheduler.health(), events: eventBus.health(), visualVerification: true },
+        capabilities: { runtime: runtime.health(), personality: personality.health(), safety: { processIsolation: 'allowlisted-spawn', osIsolation: false, shell: false }, research: research.health(), browser: browser.health(), coding: coding.health(), skills: skills.health(), specialists: specialists.list(), multiAgent: coordinator.health(), mcp: mcp.health(), background: scheduler.health(), events: eventBus.health(), visualVerification: true },
         tasks: { total: tasks.length, running: tasks.filter(task => ['planning', 'running', 'awaiting_approval', 'paused'].includes(task.status)).length }, limits: config.limits,
       };
     },
