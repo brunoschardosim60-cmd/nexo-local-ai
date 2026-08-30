@@ -113,6 +113,18 @@ function formatDuration(milliseconds?: number) {
   return `${(milliseconds / 1000).toLocaleString('pt-BR', { minimumFractionDigits: 1, maximumFractionDigits: 1 })} s`;
 }
 
+function localClock(date = new Date()) {
+  return new Intl.DateTimeFormat('pt-BR', {
+    hour: '2-digit',
+    minute: '2-digit',
+    hour12: false,
+  }).format(date);
+}
+
+function localCalendarDate(date = new Date()) {
+  return new Intl.DateTimeFormat('pt-BR', { dateStyle: 'full' }).format(date);
+}
+
 function polishPortuguese(content: string) {
   return content
     .replace(/Como posso eu ajudar/gi, 'Como posso ajudar')
@@ -527,8 +539,11 @@ export default function Home() {
       return 'Tudo bem não ter isso organizado ainda. Me conte a situação como vier, mesmo pela metade, e eu ajudo a transformar em um próximo passo. O que está pesando mais agora?';
     }
     if (question.length > 120) return null;
-    if (/(que horas|qual.*horario|horas agora|data de hoje|que dia e hoje)/.test(normalized)) {
-      return `## Agora\n\n${currentTime || new Intl.DateTimeFormat('pt-BR', { dateStyle: 'full', timeStyle: 'short' }).format(new Date())}`;
+    const asksOnlyForTime = /(que horas|qual.*horario|horas agora|hora agora|me diga.*hora)/.test(normalized)
+      || /(?:(?:apenas|so|somente).*(?:hora|horario)|(?:perguntei|pedi|quero).*(?:hora|horario)|(?:hora|horario).*(?:apenas|so|somente))/.test(normalized);
+    if (asksOnlyForTime) return `Agora são **${localClock()}**.`;
+    if (/(data de hoje|que dia e hoje|qual.*data|dia de hoje)/.test(normalized)) {
+      return `Hoje é **${localCalendarDate()}**.`;
     }
     if (/(clima|tempo hoje|temperatura|previsao do tempo)/.test(normalized)) {
       return weather
