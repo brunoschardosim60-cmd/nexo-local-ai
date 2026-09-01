@@ -6,7 +6,6 @@ import {
   type ClipboardEvent,
   type DragEvent,
   useEffect,
-  useMemo,
   useRef,
   useState,
 } from 'react';
@@ -52,6 +51,7 @@ import {
   X,
 } from 'lucide-react';
 import Image from 'next/image';
+import { useChatSessions } from '@/hooks/use-chat-sessions';
 import { useNexoTaskSync } from '@/hooks/use-nexo-task-sync';
 import { useMemoryPanel } from '@/hooks/use-memory-panel';
 import { useVoiceMode } from '@/hooks/use-voice-mode';
@@ -176,10 +176,6 @@ export default function Home() {
   const [loading, setLoading] = useState(false);
   const [activityLabel, setActivityLabel] = useState('Preparando a resposta…');
   const [notice, setNotice] = useState('');
-  const [chats, setChats] = useState<Chat[]>([]);
-  const [activeChatId, setActiveChatId] = useState('');
-  const [documents, setDocuments] = useState<LocalDocument[]>([]);
-  const [attachments, setAttachments] = useState<LocalAttachment[]>([]);
   const [webSearch, setWebSearch] = useState(false);
   const [profileOpen, setProfileOpen] = useState(false);
   const [securityOpen, setSecurityOpen] = useState(false);
@@ -187,13 +183,31 @@ export default function Home() {
   const [capabilityOpen, setCapabilityOpen] = useState(false);
   const [commandOpen, setCommandOpen] = useState(false);
   const [mobileOpen, setMobileOpen] = useState(false);
-  const [chatSearch, setChatSearch] = useState('');
   const [selectedArtifact, setSelectedArtifact] = useState<ChatMessage | null>(
     null,
   );
   const [dragActive, setDragActive] = useState(false);
   const [theme, setTheme] = useState<'system' | 'light' | 'dark'>('system');
   const [profile, setProfile] = useState<UserProfile>(DEFAULT_PROFILE);
+  const {
+    chats,
+    setChats,
+    activeChatId,
+    setActiveChatId,
+    documents,
+    setDocuments,
+    attachments,
+    setAttachments,
+    chatSearch,
+    setChatSearch,
+    activeChat,
+    history,
+    visibleChats,
+    persistChats,
+    mergeRemoteChats,
+  } = useChatSessions(setNotice, (nextChats) =>
+    syncAgentSession(nextChats, profile),
+  );
   const [currentTime, setCurrentTime] = useState('');
   const [weather, setWeather] = useState<Weather | null>(null);
   const [weatherStatus, setWeatherStatus] = useState<
@@ -231,25 +245,9 @@ export default function Home() {
     eyeState: voiceEyeState,
   } = voice.state;
 
-  const activeChat = useMemo(
-    () => chats.find((chat) => chat.id === activeChatId),
-    [chats, activeChatId],
-  );
-  const history = activeChat?.messages ?? [];
-  const visibleChats = useMemo(
-    () =>
-      chats.filter((chat) =>
-        chat.title.toLowerCase().includes(chatSearch.trim().toLowerCase()),
-      ),
-    [chats, chatSearch],
-  );
   loadingRef.current = loading;
 
   useEffect(() => {
-    const storedChats = safeParse<Chat[]>(
-      localStorage.getItem('nexo-chats'),
-      [],
-    );
     const storedProfile = {
       ...DEFAULT_PROFILE,
       ...safeParse<Partial<UserProfile>>(
@@ -265,22 +263,6 @@ export default function Home() {
       localStorage.setItem('nexo-profile', JSON.stringify(storedProfile));
       localStorage.setItem('nexo-personality-v2', '1');
     }
-    const legacy = safeParse<ChatMessage[]>(
-      localStorage.getItem('nexo-history'),
-      [],
-    );
-    const initialChats = storedChats.length
-      ? storedChats
-      : legacy.length
-        ? [
-            {
-              id: crypto.randomUUID(),
-              title: 'Conversa anterior',
-              messages: legacy,
-              updatedAt: Date.now(),
-            },
-          ]
-        : [];
     const storedTheme = localStorage.getItem('nexo-theme');
     const storedEffort = localStorage.getItem('nexo-effort') as Effort | null;
     const nextTheme =
@@ -297,11 +279,7 @@ export default function Home() {
     document.documentElement.classList.toggle('dark', resolvedTheme === 'dark');
     if (storedEffort && EFFORTS.includes(storedEffort)) setEffort(storedEffort);
     setProfile(storedProfile);
-    setChats(initialChats);
-    setActiveChatId(initialChats[0]?.id ?? '');
     setMounted(true);
-    if (initialChats.length && !storedChats.length)
-      localStorage.setItem('nexo-chats', JSON.stringify(initialChats));
 
     const updateClock = () =>
       setCurrentTime(
@@ -330,20 +308,7 @@ export default function Home() {
         const payload = await client.getSession();
         if (payload) {
           const remoteChats = payload.session?.state?.chats ?? [];
-          if (remoteChats.length) {
-            const merged = new Map<string, Chat>();
-            for (const chat of [...initialChats, ...remoteChats]) {
-              const existing = merged.get(chat.id);
-              if (!existing || chat.updatedAt > existing.updatedAt)
-                merged.set(chat.id, chat);
-            }
-            const restored = [...merged.values()]
-              .sort((a, b) => b.updatedAt - a.updatedAt)
-              .slice(0, 40);
-            setChats(restored);
-            setActiveChatId((current) => current || restored[0]?.id || '');
-            localStorage.setItem('nexo-chats', JSON.stringify(restored));
-          }
+          mergeRemoteChats(remoteChats);
           if (payload.session?.state?.profile)
             setProfile((current) => ({
               ...current,
@@ -391,20 +356,6 @@ export default function Home() {
     profile,
     setOnline: setAgentOnline,
   });
-
-  function persistChats(next: Chat[]) {
-    const limited = next
-      .map((chat) => ({ ...chat, messages: chat.messages.slice(-80) }))
-      .sort((a, b) => b.updatedAt - a.updatedAt)
-      .slice(0, 40);
-    setChats(limited);
-    try {
-      localStorage.setItem('nexo-chats', JSON.stringify(limited));
-    } catch {
-      setNotice('A memória local está cheia. Exclua chats antigos.');
-    }
-    syncAgentSession(limited, profile);
-  }
 
   function syncAgentSession(nextChats: Chat[], nextProfile: UserProfile) {
     if (!agentToken) return;
