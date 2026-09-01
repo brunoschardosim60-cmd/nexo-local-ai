@@ -22,21 +22,50 @@ const speechOutput = await readFile(
   new URL('../../hooks/use-speech-output.ts', import.meta.url),
   'utf8',
 );
+const pageView = await readFile(
+  new URL('../../components/nexo/nexo-page-view.tsx', import.meta.url),
+  'utf8',
+);
+const overlays = await readFile(
+  new URL('../../components/nexo/nexo-overlays.tsx', import.meta.url),
+  'utf8',
+);
+const composer = await readFile(
+  new URL('../../components/nexo/composer.tsx', import.meta.url),
+  'utf8',
+);
+const topBar = await readFile(
+  new URL('../../components/nexo/top-bar.tsx', import.meta.url),
+  'utf8',
+);
+const messageBubble = await readFile(
+  new URL('../../components/nexo/message-bubble.tsx', import.meta.url),
+  'utf8',
+);
+const messageList = await readFile(
+  new URL('../../components/nexo/message-list.tsx', import.meta.url),
+  'utf8',
+);
+const chatSubmit = await readFile(
+  new URL('../../lib/nexo/chat-submit.ts', import.meta.url),
+  'utf8',
+);
 const voiceSources = `${voiceMode}\n${speechOutput}`;
+const pageSources = `${page}\n${pageView}\n${overlays}\n${composer}\n${topBar}\n${messageList}\n${messageBubble}`;
 
 test('UX 2.0 keeps the chat-first shell and progressive controls', () => {
-  assert.match(page, /nexo-shell/);
-  assert.match(page, /O que vamos fazer\?/);
-  assert.match(page, /<summary[^>]*>[\s\S]*Auto/);
-  assert.match(page, /Detalhes/);
-  assert.match(page, /ArtifactPanel/);
+  assert.match(pageSources, /nexo-shell/);
+  assert.match(pageSources, /O que vamos fazer\?/);
+  assert.match(pageSources, /<summary[^>]*>[\s\S]*Auto/);
+  assert.match(pageSources, /Detalhes/);
+  assert.match(pageSources, /ArtifactPanel/);
 });
 
 test('UX 2.0 exposes accessible labels for compact icon controls', () => {
-  assert.match(page, /aria-label="Abrir paleta de comandos"/);
-  assert.match(page, /aria-label="Central de segurança"/);
-  assert.match(page, /Tema atual:/);
-  assert.match(page, /aria-label="Enviar mensagem"/);
+  assert.match(pageSources, /aria-label="Abrir paleta de comandos"/);
+  assert.match(pageSources, /aria-label="Central de segurança"/);
+  assert.match(pageSources, /Tema atual:/);
+  assert.match(pageSources, /aria-label="Enviar mensagem"/);
 });
 
 test('UX 2.0 has semantic design tokens and reduced-motion support', () => {
@@ -92,8 +121,8 @@ test('Living Eye measures real microphone energy and applies smoothing', () => {
 
 test('Voice Presence supports partial speech, endpointing, streaming TTS and barge-in', () => {
   assert.match(voiceSources, /recognition\.interimResults = true/);
-  assert.match(page, /voice\.streamSpeech\(responseTextV3/);
-  assert.match(page, /input: inputSource/);
+  assert.match(chatSubmit, /voice\.streamSpeech\(responseText/);
+  assert.match(chatSubmit, /input: options\.inputSource/);
   assert.match(voiceSources, /speech\.interrupt/);
   assert.match(livingEye, /silenceFrames >= 42/);
   assert.match(livingEye, /voiceFrames >= 11/);
