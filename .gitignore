@@ -45,9 +45,11 @@ next-env.d.ts
 /data/*.db-*
 /data/*.log
 /data/logs/
+/data/artifacts/
 /data/sessions/
 /data/vectors/
 /data/skills/
 /data/mcp-servers.json
 /.nexo-artifacts/
 /.nexo-backups/
+/.nexo-tts/
