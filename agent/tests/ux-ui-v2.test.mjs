@@ -14,6 +14,15 @@ const livingEye = await readFile(
   new URL('../../components/nexo/nexo-living-eye.tsx', import.meta.url),
   'utf8',
 );
+const voiceMode = await readFile(
+  new URL('../../hooks/use-voice-mode.ts', import.meta.url),
+  'utf8',
+);
+const speechOutput = await readFile(
+  new URL('../../hooks/use-speech-output.ts', import.meta.url),
+  'utf8',
+);
+const voiceSources = `${voiceMode}\n${speechOutput}`;
 
 test('UX 2.0 keeps the chat-first shell and progressive controls', () => {
   assert.match(page, /nexo-shell/);
@@ -76,16 +85,16 @@ test('Living Eye measures real microphone energy and applies smoothing', () => {
   assert.match(livingEye, /echoCancellation: true/);
   assert.match(livingEye, /noiseFloor/);
   assert.match(livingEye, /rawEnergy < 0\.025/);
-  assert.match(page, /event\.elapsedTime/);
-  assert.match(page, /voiceBoundaryRef/);
-  assert.match(page, /voice-eye-level/);
+  assert.match(voiceSources, /event\.elapsedTime/);
+  assert.match(voiceSources, /boundaryRef/);
+  assert.match(voiceSources, /voice-eye-level/);
 });
 
 test('Voice Presence supports partial speech, endpointing, streaming TTS and barge-in', () => {
-  assert.match(page, /recognition\.interimResults = true/);
-  assert.match(page, /queueStreamingSpeech\(responseTextV3/);
+  assert.match(voiceSources, /recognition\.interimResults = true/);
+  assert.match(page, /voice\.streamSpeech\(responseTextV3/);
   assert.match(page, /input: inputSource/);
-  assert.match(page, /interruptSpeechForBargeIn/);
+  assert.match(voiceSources, /speech\.interrupt/);
   assert.match(livingEye, /silenceFrames >= 42/);
   assert.match(livingEye, /voiceFrames >= 11/);
   assert.match(livingEye, /Conversa contínua/);
