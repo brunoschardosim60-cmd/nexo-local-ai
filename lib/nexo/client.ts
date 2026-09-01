@@ -87,6 +87,9 @@ export class NexoClient {
   async presence() { return jsonResponse<{ presence: PresenceState }>(await fetch(`${this.baseUrl}/agent/presence`, { headers: this.headers() })); }
   async updatePresence(input: Record<string, unknown>) { return (await jsonResponse<{ presence: PresenceState }>(await fetch(`${this.baseUrl}/agent/presence`, { method: 'POST', headers: this.headers(true), body: JSON.stringify(input) }))).presence; }
   async killPresence() { return (await jsonResponse<{ presence: PresenceState }>(await fetch(`${this.baseUrl}/agent/presence/kill`, { method: 'POST', headers: this.headers(true), body: '{}' }))).presence; }
+  async synthesizeSpeech(text: string, options: { voice?: string; pace?: number; energy?: string; pauses?: string; emphasis?: string } = {}, signal?: AbortSignal) {
+    return jsonResponse<{ artifact: Pick<MediaArtifact, 'id' | 'type' | 'mimeType' | 'provider' | 'metadata'>; personality: Record<string, unknown>; streaming: boolean }>(await fetch(`${this.baseUrl}/agent/audio/synthesize`, { method: 'POST', headers: this.headers(true), body: JSON.stringify({ text, ...options }), signal }));
+  }
   async mediaProviders() { return jsonResponse(await fetch(`${this.baseUrl}/agent/multimodal/providers`, { headers: this.headers() })); }
   async clearPersonal(target: 'goals' | 'activity' | 'learning') { return jsonResponse(await fetch(`${this.baseUrl}/agent/personal/clear`, { method: 'POST', headers: this.headers(true), body: JSON.stringify({ target, confirmation: 'CLEAR' }) })); }
   async warmRuntime(effort: Effort) { return jsonResponse(await fetch(`${this.baseUrl}/agent/runtime/warm`, { method: 'POST', headers: this.headers(true), body: JSON.stringify({ effort }) })); }

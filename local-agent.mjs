@@ -153,6 +153,16 @@ const server = createServer(async (request, response) => {
     if (url.pathname === '/agent/perception/session') { const session = input.action === 'stop' ? core.perception.stopSession(input.sessionId) : core.perception.startSession(input); audit(`perception_${input.action || 'start'}`, session?.id || input.sessionId, true); return send(response, 200, { ok: true, session }); }
     if (url.pathname === '/agent/presence') { const presence = input.action === 'stop' ? core.presence.stop() : input.action === 'barge-in' ? core.presence.bargeIn() : input.action === 'update' ? core.presence.update(input.patch || {}) : core.presence.start(input); audit(`presence_${input.action || 'start'}`, 'local', true, presence.mode); return send(response, 200, { ok: true, presence }); }
     if (url.pathname === '/agent/presence/kill') { const presence = core.presence.stop(); audit('presence_kill', 'microphone+screen+camera', true); return send(response, 200, { ok: true, presence }); }
+    if (url.pathname === '/agent/audio/synthesize') {
+      const availability = await core.audio.availability();
+      if (!availability.tts?.available) return send(response, 503, { error: `TTS neural local indisponível: ${availability.tts?.error || 'provider offline'}` });
+      const text = String(input.text || '').trim();
+      if (!text || text.length > 2000) return send(response, 400, { error: 'O texto da voz deve ter entre 1 e 2000 caracteres.' });
+      const controller = new AbortController(); request.once('aborted', () => controller.abort());
+      const result = await core.audio.synthesize({ text, voice: input.voice || 'nexo-pt-BR', pace: input.pace, energy: input.energy, pauses: input.pauses, emphasis: input.emphasis }, { signal: controller.signal });
+      audit('tts_synthesize', result.artifact.id, true, `${text.length} caracteres`);
+      return send(response, 200, { ok: true, artifact: { id: result.artifact.id, type: result.artifact.type, mimeType: result.artifact.mimeType, provider: result.artifact.provider, metadata: result.artifact.metadata }, personality: result.personality, streaming: result.streaming });
+    }
     if (url.pathname === '/agent/image/edit') { const availability=await core.image.availability();if(!availability.available)return send(response,200,mediaUnavailable('image',availability));const job=core.mediaQueue.enqueue('image',{...input,mode:input.mode||'image-to-image'},{priority:input.priority||3});return send(response,202,{ok:true,job,content:'Edição adicionada à fila local.'}); }
     if (url.pathname === '/agent/video/storyboard') return send(response, 200, { ok: true, storyboard: core.video.storyboard(input) });
     if (url.pathname === '/agent/video/understand') return send(response, 200, { ok: true, result: await core.video.understand(input) });
