@@ -54,6 +54,8 @@ import Image from 'next/image';
 import { useAgentConnection } from '@/hooks/use-agent-connection';
 import { useChatSessions } from '@/hooks/use-chat-sessions';
 import { useClockAndWeather } from '@/hooks/use-clock-and-weather';
+import { useComposerState } from '@/hooks/use-composer-state';
+import { useInterfaceState } from '@/hooks/use-interface-state';
 import { useNexoTaskSync } from '@/hooks/use-nexo-task-sync';
 import { useMemoryPanel } from '@/hooks/use-memory-panel';
 import { useVoiceMode } from '@/hooks/use-voice-mode';
@@ -125,7 +127,6 @@ import {
 
 const AGENT_URL = NEXO_AGENT_URL;
 const EFFORTS: Effort[] = ['Baixo', 'Médio', 'Alto', 'Extra alto'];
-
 const MODES = [
   { label: 'Geral', icon: Sparkles },
   { label: 'Programar', icon: Code2 },
@@ -144,28 +145,45 @@ const DEFAULT_PROFILE: UserProfile = {
 };
 
 export default function Home() {
-  const [mounted, setMounted] = useState(false);
-  const [mode, setMode] = useState('Geral');
-  const [effort, setEffort] = useState<Effort>('Médio');
-  const [imageQuality, setImageQuality] = useState<
-    'FAST' | 'BALANCED' | 'HIGH' | 'MAX'
-  >('BALANCED');
-  const [prompt, setPrompt] = useState('');
-  const [loading, setLoading] = useState(false);
-  const [activityLabel, setActivityLabel] = useState('Preparando a resposta…');
-  const [notice, setNotice] = useState('');
-  const [webSearch, setWebSearch] = useState(false);
-  const [profileOpen, setProfileOpen] = useState(false);
-  const [securityOpen, setSecurityOpen] = useState(false);
-  const [personalOpen, setPersonalOpen] = useState(false);
-  const [capabilityOpen, setCapabilityOpen] = useState(false);
-  const [commandOpen, setCommandOpen] = useState(false);
-  const [mobileOpen, setMobileOpen] = useState(false);
-  const [selectedArtifact, setSelectedArtifact] = useState<ChatMessage | null>(
-    null,
-  );
-  const [dragActive, setDragActive] = useState(false);
-  const [theme, setTheme] = useState<'system' | 'light' | 'dark'>('system');
+  const {
+    mode,
+    setMode,
+    effort,
+    setEffort,
+    imageQuality,
+    setImageQuality,
+    prompt,
+    setPrompt,
+    loading,
+    setLoading,
+    activityLabel,
+    setActivityLabel,
+    notice,
+    setNotice,
+    webSearch,
+    setWebSearch,
+    dragActive,
+    setDragActive,
+  } = useComposerState();
+  const {
+    mounted,
+    profileOpen,
+    setProfileOpen,
+    securityOpen,
+    setSecurityOpen,
+    personalOpen,
+    setPersonalOpen,
+    capabilityOpen,
+    setCapabilityOpen,
+    commandOpen,
+    setCommandOpen,
+    mobileOpen,
+    setMobileOpen,
+    selectedArtifact,
+    setSelectedArtifact,
+    theme,
+    toggleTheme,
+  } = useInterfaceState();
   const [profile, setProfile] = useState<UserProfile>(DEFAULT_PROFILE);
   const {
     chats,
@@ -246,51 +264,14 @@ export default function Home() {
       localStorage.setItem('nexo-profile', JSON.stringify(storedProfile));
       localStorage.setItem('nexo-personality-v2', '1');
     }
-    const storedTheme = localStorage.getItem('nexo-theme');
-    const storedEffort = localStorage.getItem('nexo-effort') as Effort | null;
-    const nextTheme =
-      storedTheme === 'light' || storedTheme === 'dark'
-        ? storedTheme
-        : 'system';
-    const resolvedTheme =
-      nextTheme === 'system'
-        ? window.matchMedia('(prefers-color-scheme: light)').matches
-          ? 'light'
-          : 'dark'
-        : nextTheme;
-    setTheme(nextTheme);
-    document.documentElement.classList.toggle('dark', resolvedTheme === 'dark');
-    if (storedEffort && EFFORTS.includes(storedEffort)) setEffort(storedEffort);
     setProfile(storedProfile);
-    setMounted(true);
 
     if (storedProfile.city) void loadByCity(storedProfile.city);
   }, []);
 
   useEffect(() => {
-    if (!mounted || theme !== 'system') return;
-    const preference = window.matchMedia('(prefers-color-scheme: dark)');
-    const applySystemTheme = (event: MediaQueryListEvent | MediaQueryList) =>
-      document.documentElement.classList.toggle('dark', event.matches);
-    applySystemTheme(preference);
-    preference.addEventListener('change', applySystemTheme);
-    return () => preference.removeEventListener('change', applySystemTheme);
-  }, [mounted, theme]);
-
-  useEffect(() => {
     messagesEnd.current?.scrollIntoView({ behavior: 'smooth' });
   }, [history.length, loading]);
-
-  useEffect(() => {
-    const listener = (event: KeyboardEvent) => {
-      if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'k') {
-        event.preventDefault();
-        setCommandOpen((value) => !value);
-      }
-    };
-    window.addEventListener('keydown', listener);
-    return () => window.removeEventListener('keydown', listener);
-  }, []);
 
   useNexoTaskSync({
     chats,
@@ -360,20 +341,6 @@ export default function Home() {
   async function openMemoryCenter() {
     setMobileOpen(false);
     await memory.openPanel();
-  }
-
-  function toggleTheme() {
-    const next =
-      theme === 'system' ? 'light' : theme === 'light' ? 'dark' : 'system';
-    const resolved =
-      next === 'system'
-        ? window.matchMedia('(prefers-color-scheme: light)').matches
-          ? 'light'
-          : 'dark'
-        : next;
-    setTheme(next);
-    localStorage.setItem('nexo-theme', next);
-    document.documentElement.classList.toggle('dark', resolved === 'dark');
   }
 
   function changeEffort(next: Effort) {
