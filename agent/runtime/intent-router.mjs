@@ -56,7 +56,7 @@ export function routeIntent({ question, mode = 'Geral', effort = 'Médio', hasDo
   }
   if (immediate) return { route: 'instant', context, reason: 'resposta-determinística', answer: immediate, needs: { memory: false, rag: false, research: false } };
   const forcedDeep = ['Alto', 'Extra alto'].includes(effort);
-  const deep = forcedDeep || webSearch || hasDocuments || ['Programar', 'Imagens', 'Planilhas'].includes(mode) || question.length > 420 || DEEP_PATTERNS.test(question);
+  const deep = forcedDeep || webSearch || hasDocuments || ['Programar', 'Imagens', 'Planilhas'].includes(mode) || question.length > 420 || DEEP_PATTERNS.test(question) || SECURITY_PATTERNS.test(question);
   return {
     route: deep ? 'deep' : 'fast', context, reason: deep ? forcedDeep ? 'esforço-selecionado' : 'contexto-complexo' : presence ? 'presença-casual' : 'conversa-leve',
     needs: { memory: MEMORY_PATTERNS.test(question) || REFERENTIAL_MEMORY_PATTERNS.test(normalizeIntent(question)), rag: hasDocuments || DOCUMENT_PATTERNS.test(question), research: webSearch },

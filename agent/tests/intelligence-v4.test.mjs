@@ -8,6 +8,7 @@ import { createDatabase } from '../memory/database.mjs';
 import { createLongTermMemory } from '../memory/long-term.mjs';
 import { createSemanticEmbeddings } from '../memory/semantic-embeddings.mjs';
 import { createModelRouter } from '../models/router.mjs';
+import { recordModelOutcome } from '../models/benchmark-learning.mjs';
 import { createCritic } from '../orchestrator/critic.mjs';
 
 const config = { fastModel: 'small', capableModel: 'large', coderModel: 'coder', reasoningModel: 'reasoner', visionModel: 'vision', embeddingModel: 'embeddinggemma' };
@@ -31,6 +32,30 @@ test('Model Router V2 usa benchmark local com amostra suficiente', () => {
   const route = createModelRouter(config, database).route({ objective: 'corrija o bug no codigo', purpose: 'response' });
   assert.equal(route.model, 'small');
   assert.equal(route.source, 'benchmarks');
+});
+
+test('Model Router confirma apenas a zona ambígua com o modelo rápido', async () => {
+  let calls = 0;
+  const classifier = { async json() { calls += 1; return { domain: 'coding', difficulty: 'high', needsTools: true, confidence: 0.91 }; } };
+  const router = createModelRouter(config, null, null, null, null, classifier);
+  const confirmed = await router.routeConfirmed({ objective: 'analise o erro da API', purpose: 'response' });
+  assert.equal(calls, 1);
+  assert.equal(confirmed.source, 'model-confirmed');
+  assert.equal(confirmed.analysis.difficulty.level, 'high');
+  await router.routeConfirmed({ objective: 'oi', purpose: 'response' });
+  assert.equal(calls, 1);
+});
+
+test('uso diário alimenta o benchmark até ativar roteamento medido', () => {
+  let row = null;
+  const database = {
+    listModelBenchmarks: () => row ? [row] : [],
+    upsertModelBenchmark(input) { row = input; return row; },
+  };
+  for (let index = 0; index < 10; index += 1) recordModelOutcome(database, { model: 'small', domain: 'chat', route: 'fast', quality: { pass: true }, metrics: { totalDuration: 1_200_000_000 } });
+  assert.equal(row.sampleCount, 10);
+  assert.equal(row.score, 1);
+  assert.equal(row.medianLatencyMs, 1200);
 });
 
 test('embeddings semânticos usam Ollama local e mantêm fallback lexical', async () => {

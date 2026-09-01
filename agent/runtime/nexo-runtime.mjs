@@ -8,6 +8,7 @@ import {
 } from '../intelligence/epistemic.mjs';
 import { inferPersonalMode } from '../personal/modes.mjs';
 import { normalizePortugueseOutput, sanitizeConversationDraft } from '../intelligence/response.mjs';
+import { recordModelOutcome } from '../models/benchmark-learning.mjs';
 
 function words(value) {
   return new Set(
@@ -193,6 +194,7 @@ export function createNexoRuntime({
   responseIntelligence = null,
   eventBus = null,
   personal = null,
+  database = null,
 }) {
   const cache = cacheStore();
 
@@ -626,13 +628,16 @@ export function createNexoRuntime({
         ? { maxMessages: 6, maxChars: 2_200 }
         : { maxMessages: 10, maxChars: 9_000 },
     );
-    const adaptiveRoute = router?.route?.({
+    const routingInput = {
       objective: `${mode}: ${question}`,
       purpose: 'response',
       mode,
       attachments: input.attachments,
       webSearch: input.webSearch,
-    });
+    };
+    const adaptiveRoute = router?.routeConfirmed
+      ? await router.routeConfirmed(routingInput)
+      : router?.route?.(routingInput);
     const selectedModel = ['Alto', 'Extra alto'].includes(effort) || conversationTurn?.requiresEscalation
       ? config.capableModel
       : adaptiveRoute?.model ||
@@ -794,6 +799,7 @@ export function createNexoRuntime({
     if (!content) throw new Error('O modelo não produziu uma resposta.');
     quality ||= responseIntelligence?.evaluate?.(content, { context: prepared.context, state: prepared.conversationState, question: prepared.question }) || null;
     conversation?.completeTurn?.({ sessionId: prepared.sessionId, content, profile: prepared.profile, historyLength: prepared.historyLength });
+    recordModelOutcome(database, { model: prepared.model, domain: prepared.contextStats?.modelRouting?.domain || 'chat', route: prepared.route, quality, metrics });
     if (
       /\b(?:prefiro|gosto|sempre|nunca|meu nome|me chama|decidimos|padr[aã]o|procedimento)\b/i.test(
         prepared.question,

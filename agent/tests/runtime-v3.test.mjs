@@ -18,6 +18,9 @@ test('Intent Router separa INSTANT, FAST, DEEP e AGENT', () => {
   assert.equal(routeIntent({ question: 'explique em detalhes a arquitetura deste sistema' }).route, 'deep');
   assert.equal(routeIntent({ question: 'corrija os bugs do projeto e rode os testes' }).route, 'agent');
   assert.equal(routeIntent({ question: 'crie uma função e testes', mode: 'Programar' }).route, 'deep');
+  assert.equal(routeIntent({ question: 'oq podemos fazer' }).route, 'fast');
+  assert.equal(routeIntent({ question: 'me ajuda com esse erro de segurança' }).route, 'deep');
+  assert.equal(routeIntent({ question: 'analise meu projeto, encontre os bugs, corrija e rode os testes' }).route, 'agent');
 });
 
 test('histórico é limitado por mensagens e caracteres', () => {

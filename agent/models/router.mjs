@@ -38,7 +38,7 @@ function difficultyFor(text, domain, purpose = '') {
   return { score: bounded, level: bounded >= 0.6 ? 'high' : bounded >= 0.34 ? 'medium' : 'low' };
 }
 
-export function createModelRouter(config, database = null, estimator = null, profiles = null, resources = null) {
+export function createModelRouter(config, database = null, estimator = null, profiles = null, resources = null, classifier = null) {
   function analyze(input = {}) {
     const objective = typeof input === 'string' ? input : input.objective || input.question || '';
     const purpose = typeof input === 'string' ? '' : String(input.purpose || 'response');
@@ -77,9 +77,37 @@ export function createModelRouter(config, database = null, estimator = null, pro
     return { ...selected, analysis, source: measured[0] ? 'benchmarks' : loaded && selected.model === loaded.model ? 'loaded-model' : 'heuristic', benchmark: selected.benchmark || null, profile: profiles?.get?.(selected.model) || null, resourceDecision: resourceDecision?.decision || null, fallback: options.find(option => option.model !== selected.model)?.model || null };
   }
 
+  async function routeConfirmed(input = {}) {
+    const initial = route(input);
+    const score = initial.analysis.difficulty.score;
+    const ambiguous = initial.source === 'heuristic' && score >= 0.42 && score <= 0.56;
+    if (!ambiguous || !classifier?.json) return initial;
+    try {
+      const verdict = await classifier.json({
+        model: config.fastModel,
+        system: 'Classifique uma tarefa para roteamento local. Responda JSON estrito. Não execute a tarefa.',
+        prompt: JSON.stringify({ objective: initial.analysis.objective, currentDomain: initial.analysis.domain, currentDifficulty: initial.analysis.difficulty, allowedDomains: ['chat', 'coding', 'reasoning', 'research', 'documents', 'data', 'vision'], allowedLevels: ['low', 'medium', 'high'], output: { domain: 'allowedDomains', difficulty: 'allowedLevels', needsTools: 'boolean', confidence: '0..1' } }),
+        temperature: 0,
+        numPredict: 90,
+        timeoutMs: 15_000,
+      });
+      const domain = DOMAIN_PATTERNS[verdict?.domain] || verdict?.domain === 'chat' ? verdict.domain : initial.analysis.domain;
+      const level = ['low', 'medium', 'high'].includes(verdict?.difficulty) ? verdict.difficulty : initial.analysis.difficulty.level;
+      if ((Number(verdict?.confidence) || 0) < 0.65) return { ...initial, confirmation: { attempted: true, accepted: false } };
+      const analysis = { ...initial.analysis, domain, difficulty: { ...initial.analysis.difficulty, level }, needsTools: Boolean(verdict.needsTools), reasons: [...initial.analysis.reasons, 'classificacao-confirmada'] };
+      const options = candidates(analysis);
+      const requiresCapable = level === 'high' || ['coding', 'reasoning'].includes(domain);
+      const selected = requiresCapable ? options.find(option => option.role !== 'fast') || options[0] : options[0];
+      return { ...initial, ...selected, analysis, source: 'model-confirmed', fallback: options.find(option => option.model !== selected.model)?.model || null, confirmation: { attempted: true, accepted: true, confidence: Number(verdict.confidence) } };
+    } catch {
+      return { ...initial, confirmation: { attempted: true, accepted: false, error: 'classifier-unavailable' } };
+    }
+  }
+
   return {
     analyze,
     route,
+    routeConfirmed,
     complexity(objective = '') { return analyze({ objective }).difficulty.level; },
     choose(purpose, complexityOrInput = 'medium') {
       if (typeof complexityOrInput === 'object') return route({ ...complexityOrInput, purpose }).model;

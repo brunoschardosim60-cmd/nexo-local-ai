@@ -271,14 +271,15 @@ export function createNexoCore(overrides = {}) {
     fetchImpl: overrides.fetchImpl,
   });
   const resources = createResourceManager({ profiles });
+  const ollama = createOllamaClient(config);
   const router = createModelRouter(
     config,
     database,
     estimator,
     profiles,
     resources,
+    ollama,
   );
-  const ollama = createOllamaClient(config);
   const responseIntelligence = createResponseIntelligence({ personality });
   const artifacts = createArtifactStore({ dataDir: config.dataDir, database });
   proactivity.setResourceManager(resources);
@@ -486,6 +487,7 @@ export function createNexoCore(overrides = {}) {
     responseIntelligence,
     eventBus,
     personal,
+    database,
   });
   scheduler.setExecutor((objective) => loop.enqueueTask(objective));
   proactivity.setAutomationExecutor((action, context) => {
