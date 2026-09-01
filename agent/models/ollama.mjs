@@ -38,7 +38,7 @@ export function createOllamaClient(config) {
         const response = await fetch(`${config.ollamaUrl}/api/chat`, {
           method: 'POST', headers: { 'Content-Type': 'application/json' }, signal: controller.signal,
           body: JSON.stringify({
-            model, stream: false, format: 'json', keep_alive: '3m',
+            model, stream: false, format: 'json', keep_alive: config.modelKeepAlive || '30m',
             options: { temperature, top_p: 0.9, repeat_penalty: 1.1, num_ctx: 6144, num_predict: numPredict },
             messages: [{ role: 'system', content: system }, { role: 'user', content: prompt }],
           }),
@@ -57,7 +57,7 @@ export function createOllamaClient(config) {
         const response = await fetch(`${config.ollamaUrl}/api/chat`, {
           method: 'POST', headers: { 'Content-Type': 'application/json' }, signal: controller.signal,
           body: JSON.stringify({
-            model, stream: true, keep_alive: '3m',
+            model, stream: true, keep_alive: config.modelKeepAlive || '30m',
             options: { temperature, top_p: 0.9, repeat_penalty: 1.1, num_ctx: numContext, num_predict: numPredict, ...(stop.length ? { stop } : {}) },
             messages,
           }),

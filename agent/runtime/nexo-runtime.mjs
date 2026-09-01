@@ -688,6 +688,8 @@ export function createNexoRuntime({
         numContext:
           decision.route === 'fast'
             ? 2_048
+            : adaptiveRoute?.analysis?.needsLongContext
+              ? Math.min(config.limits.contextTokens || 12_000, effort === 'Extra alto' ? 12_000 : 8_192)
             : effort === 'Extra alto'
               ? 6_144
               : 4_096,
