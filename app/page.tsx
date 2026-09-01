@@ -51,7 +51,9 @@ import {
   X,
 } from 'lucide-react';
 import Image from 'next/image';
+import { useAgentConnection } from '@/hooks/use-agent-connection';
 import { useChatSessions } from '@/hooks/use-chat-sessions';
+import { useClockAndWeather } from '@/hooks/use-clock-and-weather';
 import { useNexoTaskSync } from '@/hooks/use-nexo-task-sync';
 import { useMemoryPanel } from '@/hooks/use-memory-panel';
 import { useVoiceMode } from '@/hooks/use-voice-mode';
@@ -60,7 +62,6 @@ import { BRAND_NAME } from '@/lib/nexo/brand';
 import {
   parseAgentTask,
   taskStatusLabel,
-  type AgentHealth,
   type AgentPermission,
   type AgentTask,
   type Chat,
@@ -122,29 +123,6 @@ import {
   weatherDescription,
 } from '@/lib/nexo/page-helpers';
 
-type Weather = {
-  label: string;
-  temperature: number;
-  apparent: number;
-  wind: number;
-  code: number;
-};
-type WeatherApiResponse = {
-  current: {
-    temperature_2m: number;
-    apparent_temperature: number;
-    wind_speed_10m: number;
-    weather_code: number;
-  };
-};
-type GeocodingApiResponse = {
-  results?: Array<{
-    name: string;
-    admin1?: string;
-    latitude: number;
-    longitude: number;
-  }>;
-};
 const AGENT_URL = NEXO_AGENT_URL;
 const EFFORTS: Effort[] = ['Baixo', 'Médio', 'Alto', 'Extra alto'];
 
@@ -208,15 +186,20 @@ export default function Home() {
   } = useChatSessions(setNotice, (nextChats) =>
     syncAgentSession(nextChats, profile),
   );
-  const [currentTime, setCurrentTime] = useState('');
-  const [weather, setWeather] = useState<Weather | null>(null);
-  const [weatherStatus, setWeatherStatus] = useState<
-    'idle' | 'loading' | 'error'
-  >('idle');
-  const [agentOnline, setAgentOnline] = useState(false);
-  const [agentToken, setAgentToken] = useState('');
-  const [agentHealth, setAgentHealth] = useState<AgentHealth | null>(null);
-  const [actionLoading, setActionLoading] = useState(false);
+  const { currentTime, weather, weatherStatus, loadByCity, useDeviceLocation } =
+    useClockAndWeather();
+  const connection = useAgentConnection(({ chats: remoteChats, profile }) => {
+    mergeRemoteChats(remoteChats);
+    if (profile) setProfile((current) => ({ ...current, ...profile }));
+  });
+  const {
+    online: agentOnline,
+    token: agentToken,
+    health: agentHealth,
+    actionLoading,
+    setActionLoading,
+    setOnline: setAgentOnline,
+  } = connection;
   const fileInput = useRef<HTMLInputElement>(null);
   const messagesEnd = useRef<HTMLDivElement>(null);
   const requestController = useRef<AbortController | null>(null);
@@ -281,47 +264,7 @@ export default function Home() {
     setProfile(storedProfile);
     setMounted(true);
 
-    const updateClock = () =>
-      setCurrentTime(
-        new Intl.DateTimeFormat('pt-BR', {
-          dateStyle: 'full',
-          timeStyle: 'short',
-        }).format(new Date()),
-      );
-    updateClock();
-    const timer = window.setInterval(updateClock, 30_000);
-    if (storedProfile.city) void loadWeatherByCity(storedProfile.city);
-    new NexoClient()
-      .health()
-      .then(async (data: AgentHealth) => {
-        setAgentOnline(true);
-        setAgentToken(data.sessionToken);
-        setAgentHealth(data);
-        const client = new NexoClient(data.sessionToken);
-        void client
-          .warmRuntime(
-            storedEffort && EFFORTS.includes(storedEffort)
-              ? storedEffort
-              : 'Médio',
-          )
-          .catch(() => undefined);
-        const payload = await client.getSession();
-        if (payload) {
-          const remoteChats = payload.session?.state?.chats ?? [];
-          mergeRemoteChats(remoteChats);
-          if (payload.session?.state?.profile)
-            setProfile((current) => ({
-              ...current,
-              ...payload.session!.state!.profile,
-            }));
-        }
-      })
-      .catch(() => {
-        setAgentOnline(false);
-        setAgentToken('');
-        setAgentHealth(null);
-      });
-    return () => window.clearInterval(timer);
+    if (storedProfile.city) void loadByCity(storedProfile.city);
   }, []);
 
   useEffect(() => {
@@ -388,74 +331,11 @@ export default function Home() {
     if (activeChatId === id) setActiveChatId(next[0]?.id ?? '');
   }
 
-  async function fetchWeather(
-    latitude: number,
-    longitude: number,
-    label: string,
-  ) {
-    const response = await fetch(
-      `https://api.open-meteo.com/v1/forecast?latitude=${latitude}&longitude=${longitude}&current=temperature_2m,apparent_temperature,weather_code,wind_speed_10m&timezone=auto`,
-    );
-    if (!response.ok) throw new Error('weather');
-    const data = (await response.json()) as WeatherApiResponse;
-    const current = data.current;
-    const next = {
-      label,
-      temperature: current.temperature_2m,
-      apparent: current.apparent_temperature,
-      wind: current.wind_speed_10m,
-      code: current.weather_code,
-    };
-    setWeather(next);
-    setWeatherStatus('idle');
-    return next;
-  }
-
-  async function loadWeatherByCity(city: string) {
-    if (!city.trim()) return null;
-    setWeatherStatus('loading');
-    try {
-      const response = await fetch(
-        `https://geocoding-api.open-meteo.com/v1/search?name=${encodeURIComponent(city)}&count=1&language=pt&format=json`,
-      );
-      const data = (await response.json()) as GeocodingApiResponse;
-      const place = data.results?.[0];
-      if (!place) throw new Error('city');
-      return await fetchWeather(
-        place.latitude,
-        place.longitude,
-        `${place.name}${place.admin1 ? `, ${place.admin1}` : ''}`,
-      );
-    } catch {
-      setWeatherStatus('error');
-      setWeather(null);
-      return null;
-    }
-  }
-
-  function useDeviceLocation() {
-    if (!navigator.geolocation) {
-      setWeatherStatus('error');
-      return;
-    }
-    setWeatherStatus('loading');
-    navigator.geolocation.getCurrentPosition(
-      (position) =>
-        void fetchWeather(
-          position.coords.latitude,
-          position.coords.longitude,
-          'Sua localização',
-        ).catch(() => setWeatherStatus('error')),
-      () => setWeatherStatus('error'),
-      { timeout: 12_000 },
-    );
-  }
-
   function saveProfile() {
     localStorage.setItem('nexo-profile', JSON.stringify(profile));
     setProfileOpen(false);
     syncAgentSession(chats, profile);
-    if (profile.city) void loadWeatherByCity(profile.city);
+    if (profile.city) void loadByCity(profile.city);
   }
 
   async function resetAdaptivePersonality() {
@@ -499,8 +379,7 @@ export default function Home() {
   function changeEffort(next: Effort) {
     setEffort(next);
     localStorage.setItem('nexo-effort', next);
-    if (agentToken)
-      void new NexoClient(agentToken).warmRuntime(next).catch(() => undefined);
+    void connection.warmRuntime(next);
   }
 
   async function addFiles(files: File[]) {
