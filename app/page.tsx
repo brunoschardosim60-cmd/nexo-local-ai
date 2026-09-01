@@ -53,6 +53,7 @@ import {
 } from 'lucide-react';
 import Image from 'next/image';
 import { useNexoTaskSync } from '@/hooks/use-nexo-task-sync';
+import { useMemoryPanel } from '@/hooks/use-memory-panel';
 import { useVoiceMode } from '@/hooks/use-voice-mode';
 import { NexoClient, NEXO_AGENT_URL } from '@/lib/nexo/client';
 import { BRAND_NAME } from '@/lib/nexo/brand';
@@ -70,7 +71,6 @@ import {
   type MediaArtifact,
   type MessageKind,
   type NexoAction,
-  type NexoMemory,
   type UserProfile,
 } from '@/lib/nexo/types';
 import { Badge } from '@/components/ui/badge';
@@ -104,6 +104,7 @@ import { PresenceControls } from '@/components/nexo/presence-controls';
 import { CapabilityCenter } from '@/components/nexo/capability-center';
 import { NexoOrb } from '@/components/nexo/nexo-orb';
 import { ArtifactPanel } from '@/components/nexo/artifact-panel';
+import { MemoryPanel } from '@/components/nexo/memory-panel';
 import {
   NexoLivingEyeMini,
   NexoVoicePresence,
@@ -182,12 +183,6 @@ export default function Home() {
   const [webSearch, setWebSearch] = useState(false);
   const [profileOpen, setProfileOpen] = useState(false);
   const [securityOpen, setSecurityOpen] = useState(false);
-  const [memoryOpen, setMemoryOpen] = useState(false);
-  const [memories, setMemories] = useState<NexoMemory[]>([]);
-  const [memoryQuery, setMemoryQuery] = useState('');
-  const [selectedMemoryId, setSelectedMemoryId] = useState('');
-  const [memoryDraft, setMemoryDraft] = useState('');
-  const [memoryLoading, setMemoryLoading] = useState(false);
   const [personalOpen, setPersonalOpen] = useState(false);
   const [capabilityOpen, setCapabilityOpen] = useState(false);
   const [commandOpen, setCommandOpen] = useState(false);
@@ -212,6 +207,7 @@ export default function Home() {
   const messagesEnd = useRef<HTMLDivElement>(null);
   const requestController = useRef<AbortController | null>(null);
   const loadingRef = useRef(false);
+  const memory = useMemoryPanel(agentToken, setNotice);
 
   const voice = useVoiceMode({
     agentOnline,
@@ -530,68 +526,9 @@ export default function Home() {
     }
   }
 
-  async function loadMemories(query = memoryQuery) {
-    if (!agentToken) {
-      setNotice('O Nexo Runtime está offline.');
-      return;
-    }
-    setMemoryLoading(true);
-    try {
-      const items = await new NexoClient(agentToken).listMemories({
-        query: query.trim() || undefined,
-        limit: 100,
-      });
-      setMemories(items);
-      const selected =
-        items.find((item) => item.id === selectedMemoryId) || items[0];
-      setSelectedMemoryId(selected?.id || '');
-      setMemoryDraft(selected?.content || '');
-    } catch (error) {
-      setNotice(
-        error instanceof Error
-          ? error.message
-          : 'Não consegui abrir a memória.',
-      );
-    } finally {
-      setMemoryLoading(false);
-    }
-  }
-
   async function openMemoryCenter() {
-    setMemoryOpen(true);
     setMobileOpen(false);
-    await loadMemories('');
-  }
-  async function manageSelectedMemory(
-    action: 'update' | 'confirm' | 'forget' | 'delete',
-  ) {
-    if (!agentToken || !selectedMemoryId) return;
-    setMemoryLoading(true);
-    try {
-      await new NexoClient(agentToken).manageMemory(
-        selectedMemoryId,
-        action,
-        action === 'update' ? { content: memoryDraft } : undefined,
-      );
-      setNotice(
-        action === 'delete'
-          ? 'Memória apagada definitivamente.'
-          : action === 'forget'
-            ? 'Memória arquivada.'
-            : action === 'confirm'
-              ? 'Memória confirmada.'
-              : 'Memória atualizada.',
-      );
-      await loadMemories(memoryQuery);
-    } catch (error) {
-      setNotice(
-        error instanceof Error
-          ? error.message
-          : 'Não consegui alterar a memória.',
-      );
-    } finally {
-      setMemoryLoading(false);
-    }
+    await memory.openPanel();
   }
 
   function toggleTheme() {
@@ -2474,145 +2411,7 @@ export default function Home() {
         </DialogContent>
       </Dialog>
 
-      <Dialog open={memoryOpen} onOpenChange={setMemoryOpen}>
-        <DialogContent className="max-h-[calc(100dvh-2rem)] overflow-hidden border border-border bg-card sm:max-w-4xl">
-          <DialogHeader>
-            <DialogTitle className="flex items-center gap-2">
-              <Library className="text-primary" /> Memória do Nexo
-            </DialogTitle>
-            <DialogDescription>
-              Pesquise, confira e controle o que o Nexo mantém no SQLite deste
-              computador.
-            </DialogDescription>
-          </DialogHeader>
-          <div className="flex gap-2">
-            <Input
-              value={memoryQuery}
-              onChange={(event) => setMemoryQuery(event.target.value)}
-              onKeyDown={(event) => {
-                if (event.key === 'Enter') void loadMemories();
-              }}
-              placeholder="Pesquisar pelo significado…"
-            />
-            <Button
-              variant="outline"
-              onClick={() => void loadMemories()}
-              disabled={memoryLoading}
-            >
-              <Search /> Buscar
-            </Button>
-          </div>
-          <div className="grid min-h-0 gap-3 md:grid-cols-[minmax(0,1fr)_minmax(0,1.25fr)]">
-            <ScrollArea className="h-[360px] rounded-2xl border border-border">
-              <div className="space-y-1 p-2">
-                {memories.length === 0 ? (
-                  <p className="p-4 text-xs text-muted-foreground">
-                    {memoryLoading
-                      ? 'Carregando…'
-                      : 'Nenhuma memória encontrada.'}
-                  </p>
-                ) : (
-                  memories.map((item) => (
-                    <button
-                      key={item.id}
-                      className={`w-full rounded-xl p-3 text-left transition ${item.id === selectedMemoryId ? 'bg-primary/10 ring-1 ring-primary/25' : 'hover:bg-muted'}`}
-                      onClick={() => {
-                        setSelectedMemoryId(item.id);
-                        setMemoryDraft(item.content);
-                      }}
-                    >
-                      <div className="flex items-center justify-between gap-2">
-                        <Badge variant="outline" className="text-[9px]">
-                          {item.type}
-                        </Badge>
-                        <span
-                          className={`text-[9px] ${item.status === 'UNCERTAIN' ? 'text-amber-500' : 'text-emerald-500'}`}
-                        >
-                          {item.status}
-                        </span>
-                      </div>
-                      <p className="mt-2 line-clamp-2 text-xs leading-5">
-                        {item.summary || item.content}
-                      </p>
-                      <p className="mt-1 text-[10px] text-muted-foreground">
-                        {item.scope} · {Math.round(item.confidence * 100)}% ·{' '}
-                        {item.source}
-                      </p>
-                    </button>
-                  ))
-                )}
-              </div>
-            </ScrollArea>
-            {(() => {
-              const item = memories.find(
-                (memory) => memory.id === selectedMemoryId,
-              );
-              return item ? (
-                <div className="flex h-[360px] min-h-0 flex-col rounded-2xl border border-border p-4">
-                  <div className="flex flex-wrap gap-1.5">
-                    <Badge>{item.type}</Badge>
-                    <Badge variant="outline">{item.privacy}</Badge>
-                    <Badge variant="outline">{item.scope}</Badge>
-                  </div>
-                  <Textarea
-                    className="mt-3 min-h-0 flex-1 resize-none"
-                    value={memoryDraft}
-                    onChange={(event) => setMemoryDraft(event.target.value)}
-                  />
-                  <p className="mt-2 text-[10px] text-muted-foreground">
-                    Observado em{' '}
-                    {new Date(item.observedAt).toLocaleString('pt-BR')} ·
-                    confiança {Math.round(item.confidence * 100)}%
-                  </p>
-                  <div className="mt-3 flex flex-wrap gap-2">
-                    <Button
-                      size="sm"
-                      onClick={() => void manageSelectedMemory('update')}
-                      disabled={memoryLoading}
-                    >
-                      <FilePenLine /> Salvar
-                    </Button>
-                    {item.status === 'UNCERTAIN' && (
-                      <Button
-                        size="sm"
-                        variant="outline"
-                        onClick={() => void manageSelectedMemory('confirm')}
-                        disabled={memoryLoading}
-                      >
-                        <Check /> Confirmar
-                      </Button>
-                    )}
-                    <Button
-                      size="sm"
-                      variant="outline"
-                      onClick={() => void manageSelectedMemory('forget')}
-                      disabled={memoryLoading}
-                    >
-                      Arquivar
-                    </Button>
-                    <Button
-                      size="sm"
-                      variant="destructive"
-                      onClick={() => void manageSelectedMemory('delete')}
-                      disabled={memoryLoading}
-                    >
-                      <Trash2 /> Apagar
-                    </Button>
-                  </div>
-                </div>
-              ) : (
-                <div className="grid h-[360px] place-items-center rounded-2xl border border-dashed border-border text-xs text-muted-foreground">
-                  Selecione uma memória.
-                </div>
-              );
-            })()}
-          </div>
-          <p className="text-[10px] leading-4 text-muted-foreground">
-            Memórias restritas nunca são enviadas a serviços externos. “Apagar”
-            remove o registro; “Arquivar” o preserva fora da recuperação normal.
-          </p>
-        </DialogContent>
-      </Dialog>
+      <MemoryPanel panel={memory} />
 
       <Dialog open={securityOpen} onOpenChange={setSecurityOpen}>
         <DialogContent className="max-h-[calc(100dvh-2rem)] overflow-y-auto border border-border bg-card sm:max-w-xl">
