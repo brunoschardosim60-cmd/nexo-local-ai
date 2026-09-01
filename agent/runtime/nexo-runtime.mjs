@@ -9,6 +9,7 @@ import {
 import { inferPersonalMode } from '../personal/modes.mjs';
 import { normalizePortugueseOutput, sanitizeConversationDraft } from '../intelligence/response.mjs';
 import { recordModelOutcome } from '../models/benchmark-learning.mjs';
+import { adaptiveCorrectionBudget } from '../orchestrator/adaptive-budgets.mjs';
 
 function words(value) {
   return new Set(
@@ -461,9 +462,12 @@ export function createNexoRuntime({
         Alto: { maxSteps: 32, maxToolCalls: 64, maxModelCalls: 50 },
         'Extra alto': { maxSteps: 50, maxToolCalls: 100, maxModelCalls: 78 },
       };
+      const taskDifficulty = router?.analyze?.({ objective: question, mode, attachments: input.attachments, webSearch: input.webSearch })?.difficulty?.level || complexity?.level || 'medium';
+      const correctionBudget = adaptiveCorrectionBudget({ difficulty: taskDifficulty, effort });
       const task = loop.enqueueTask(question, {
         ...(effortBudgets[effort] || effortBudgets.Médio),
-        maxRetries: effort === 'Baixo' ? 1 : 2,
+        maxRetries: correctionBudget.maxRetries,
+        maxSelfCorrections: correctionBudget.maxSelfCorrections,
         ...(explicitWorkspaceScope(question) ? { scopes: [explicitWorkspaceScope(question)] } : {}),
       });
       return {
@@ -472,6 +476,7 @@ export function createNexoRuntime({
         task,
         model: 'Nexo Core',
         context: decision.context,
+        correctionBudget,
       };
     }
 

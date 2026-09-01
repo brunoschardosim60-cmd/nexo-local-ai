@@ -30,10 +30,12 @@ export function createAgentConfig(overrides = {}) {
     limits: {
       maxSteps: 60,
       maxRetries: 2,
+      maxRetryLimit: 4,
       maxToolCalls: 120,
       maxModelCalls: 90,
       maxCost: 0,
       maxSelfCorrections: 3,
+      maxSelfCorrectionLimit: 5,
       maxToolOutput: 24_000,
       contextTokens: Number(process.env.NEXO_CONTEXT_TOKENS) || 12_000,
       maxTaskMinutes: 20,

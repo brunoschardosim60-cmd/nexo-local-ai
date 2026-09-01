@@ -41,7 +41,7 @@ export function createAgentLoop({ config, database, registry, permissionManager,
     const limits = validateTaskLimits(options, config.limits);
     const assignedAgent = options.assignedAgent || specialistRegistry?.suggest?.(objective) || 'general';
     const goal = goalEngine?.create?.(objective, options) || { objective: objective.trim(), completionState: 'OPEN', acceptanceCriteria: [] };
-    const budgets = { maxSteps: limits.maxSteps, maxRetries: limits.maxRetries, maxToolCalls: limits.maxToolCalls, maxModelCalls: limits.maxModelCalls, maxDurationMs: limits.maxDurationMs, maxCost: limits.maxCost };
+    const budgets = { maxSteps: limits.maxSteps, maxRetries: limits.maxRetries, maxSelfCorrections: limits.maxSelfCorrections, maxToolCalls: limits.maxToolCalls, maxModelCalls: limits.maxModelCalls, maxDurationMs: limits.maxDurationMs, maxCost: limits.maxCost };
     let task = database.createTask({ objective: objective.trim(), ...limits, parentTaskId: options.parentTaskId || null, assignedAgent, goal, budgets, usage: { modelCalls: 0, toolCalls: 0, tokens: 0, cost: 0 }, workingMemory: { objective: objective.trim(), memoryScope: options.memoryScope || `project:${options.scopes?.[0] || '.'}`, pending: [], evidence: [] } });
     controllers.set(task.id, new AbortController());
     if (capabilityManager) { const grant = capabilityManager.issue({ taskId: task.id, agent: assignedAgent, namespaces: specialist(assignedAgent).toolNamespaces, scopes: options.scopes || ['.'], ttlMs: limits.maxDurationMs }); task = database.updateTask(task.id, { capabilityId: grant.id }); }
@@ -70,7 +70,8 @@ export function createAgentLoop({ config, database, registry, permissionManager,
   async function finish(task) {
     const runs = database.getToolRuns(task.id); const validation = await evaluator.summarize(task, runs);
     const correctionRounds = database.getEvents(task.id).filter(event => event.type === 'critic.replan').length;
-    if (validation.verdict !== 'PASS' && critic && correctionRounds < config.limits.maxSelfCorrections && task.stepsUsed < task.maxSteps) {
+    const maxSelfCorrections = task.budgets?.maxSelfCorrections ?? config.limits.maxSelfCorrections;
+    if (validation.verdict !== 'PASS' && critic && correctionRounds < maxSelfCorrections && task.stepsUsed < task.maxSteps) {
       recordModelCall(task.id);
       const review = await critic.review({ task, runs, validation, correctionRound: correctionRounds, signal: controllers.get(task.id)?.signal });
       database.addEvent(task.id, 'critic.reviewed', `Critic: ${validation.verdict} — ${review.gap}`, { validation, review, correctionRound: correctionRounds + 1 }, 'warn');
@@ -82,7 +83,7 @@ export function createAgentLoop({ config, database, registry, permissionManager,
         if (recovery.length) {
           const plan = [...completed, ...recovery];
           database.updateTask(task.id, { plan, currentStep: completed.length, status: 'running', result: validation, completedAt: null }); graph.sync(task.id, plan);
-          database.addEvent(task.id, 'critic.replan', `Autocorreção ${correctionRounds + 1}/${config.limits.maxSelfCorrections}: estratégia alterada.`, { review, recoverySteps: recovery.map(item => item.title) }, 'warn');
+          database.addEvent(task.id, 'critic.replan', `Autocorreção ${correctionRounds + 1}/${maxSelfCorrections}: estratégia alterada.`, { review, recoverySteps: recovery.map(item => item.title) }, 'warn');
           checkpointStore.capture(task.id, 'critic-replan', review.gap);
           return run(task.id);
         }
