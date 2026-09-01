@@ -1,6 +1,6 @@
 'use client';
 
-import type { Dispatch, MutableRefObject, SetStateAction } from 'react';
+import type { Dispatch, RefObject, SetStateAction } from 'react';
 import { NexoClient } from '@/lib/nexo/client';
 import {
   isImageCreationRequest,
@@ -41,8 +41,8 @@ export type ChatSubmitOptions = {
   weather: Weather | null;
   agentOnline: boolean;
   agentToken: string;
-  loadingRef: MutableRefObject<boolean>;
-  requestController: MutableRefObject<AbortController | null>;
+  loadingRef: RefObject<boolean>;
+  requestController: RefObject<AbortController | null>;
   voice: VoiceBridge;
   setActivityLabel: (label: string) => void;
   setLoading: (loading: boolean) => void;

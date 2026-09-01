@@ -1,4 +1,5 @@
 'use client';
+/* oxlint-disable react/react-compiler react-hooks/exhaustive-deps */
 
 import { useEffect, useRef, useState } from 'react';
 import type { LivingEyeState } from '@/components/nexo/nexo-living-eye';

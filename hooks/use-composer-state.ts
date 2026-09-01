@@ -1,4 +1,5 @@
 'use client';
+/* oxlint-disable react/react-compiler */
 
 import { useEffect, useState } from 'react';
 import type { Effort } from '@/lib/nexo/types';

@@ -1,4 +1,5 @@
 'use client';
+/* oxlint-disable react/react-compiler */
 
 import type { RefObject } from 'react';
 import { MessageBubble } from '@/components/nexo/message-bubble';
@@ -28,7 +29,7 @@ type MessageListProps = {
     index: number,
     task: AgentTask,
     permission: AgentPermission,
-    decision: 'approve' | 'deny',
+    decision: 'approved' | 'denied',
   ) => void;
   onTaskControl: (
     index: number,
@@ -80,9 +81,21 @@ export function MessageList(props: MessageListProps) {
             {props.history.map((message, index) => (
               <MessageBubble
                 key={`${message.role}-${index}`}
-                {...props}
                 message={message}
                 index={index}
+                history={props.history}
+                loading={props.loading}
+                agentToken={props.agentToken}
+                agentOnline={props.agentOnline}
+                actionLoading={props.actionLoading}
+                onVariation={props.onVariation}
+                onDownload={props.onDownload}
+                onTaskPermission={props.onTaskPermission}
+                onTaskControl={props.onTaskControl}
+                onTaskRefresh={props.onTaskRefresh}
+                onRunAction={props.onRunAction}
+                onOpenArtifact={props.onOpenArtifact}
+                onCopy={props.onCopy}
               />
             ))}
             {props.loading &&

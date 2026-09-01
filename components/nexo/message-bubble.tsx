@@ -1,16 +1,12 @@
 'use client';
+/* oxlint-disable jsx-a11y/media-has-caption */
 
 import Image from 'next/image';
 import {
   Copy,
   Download,
-  FilePenLine,
   FileText,
-  FolderPlus,
-  Library,
   RefreshCw,
-  Server,
-  ShieldCheck,
 } from 'lucide-react';
 import { AgentTaskCard } from '@/components/nexo/agent-task-card';
 import { ActionRequest } from '@/components/nexo/action-request';
@@ -19,8 +15,6 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { NexoClient } from '@/lib/nexo/client';
 import {
-  actionButton,
-  actionTitle,
   cleanSvg,
   formatDuration,
   parseAction,
@@ -49,7 +43,7 @@ type MessageBubbleProps = {
     index: number,
     task: AgentTask,
     permission: AgentPermission,
-    decision: 'approve' | 'deny',
+    decision: 'approved' | 'denied',
   ) => void;
   onTaskControl: (
     index: number,

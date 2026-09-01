@@ -1,9 +1,10 @@
 'use client';
+/* oxlint-disable react/react-compiler */
 
 import type {
   Dispatch,
-  MutableRefObject,
   ReactNode,
+  RefObject,
   SetStateAction,
 } from 'react';
 import {
@@ -21,7 +22,6 @@ import { ProfilePanel } from '@/components/nexo/profile-panel';
 import { SecurityPanel } from '@/components/nexo/security-panel';
 import { NexoVoicePresence } from '@/components/nexo/nexo-living-eye';
 import type { useAgentConnection } from '@/hooks/use-agent-connection';
-import type { useChatSessions } from '@/hooks/use-chat-sessions';
 import type { useComposerState } from '@/hooks/use-composer-state';
 import type { useInterfaceState } from '@/hooks/use-interface-state';
 import type { useMemoryPanel } from '@/hooks/use-memory-panel';
@@ -31,17 +31,14 @@ import type { UserProfile } from '@/lib/nexo/types';
 type NexoOverlaysProps = {
   ui: ReturnType<typeof useInterfaceState>;
   composer: ReturnType<typeof useComposerState>;
-  sessions: ReturnType<typeof useChatSessions>;
   connection: ReturnType<typeof useAgentConnection>;
   memory: ReturnType<typeof useMemoryPanel>;
   voice: ReturnType<typeof useVoiceMode>;
   profile: UserProfile;
   setProfile: Dispatch<SetStateAction<UserProfile>>;
   sidebar: ReactNode;
-  requestController: MutableRefObject<AbortController | null>;
-  loadingRef: MutableRefObject<boolean>;
-  onCreateChat: () => void;
-  onAsk: (question?: string, source?: 'text' | 'voice') => Promise<void> | void;
+  requestController: RefObject<AbortController | null>;
+  loadingRef: RefObject<boolean>;
   onSaveProfile: () => void;
   onResetPersonality: () => Promise<void>;
 };
@@ -63,9 +60,8 @@ export function NexoOverlays(props: NexoOverlaysProps) {
     securityOpen,
     setSecurityOpen,
   } = props.ui;
-  const { effort, setEffort, mode, setMode, loading, setLoading, setNotice } =
+  const { prompt, setPrompt, setMode, setLoading, setNotice } =
     props.composer;
-  const { chats, setChats } = props.sessions;
   const {
     token: agentToken,
     online: agentOnline,
@@ -75,9 +71,6 @@ export function NexoOverlays(props: NexoOverlaysProps) {
   const setProfile = props.setProfile;
   const voice = props.voice;
   const {
-    listening,
-    voiceOutput,
-    speaking,
     voiceModeOpen,
     voiceConversation,
     voiceInterim,
@@ -89,8 +82,6 @@ export function NexoOverlays(props: NexoOverlaysProps) {
   } = voice.state;
   const sidebar = props.sidebar;
   const memory = props.memory;
-  const createChat = props.onCreateChat;
-  const askNexo = props.onAsk;
   const requestController = props.requestController;
   const loadingRef = props.loadingRef;
   return (

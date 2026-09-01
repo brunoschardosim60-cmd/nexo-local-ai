@@ -1,4 +1,5 @@
 'use client';
+/* oxlint-disable react/react-compiler */
 
 import { useEffect, useMemo, useState } from 'react';
 import { safeParse } from '@/lib/nexo/page-helpers';

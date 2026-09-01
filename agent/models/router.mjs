@@ -91,7 +91,10 @@ export function createModelRouter(config, database = null, estimator = null, pro
         numPredict: 90,
         timeoutMs: 15_000,
       });
-      const domain = DOMAIN_PATTERNS[verdict?.domain] || verdict?.domain === 'chat' ? verdict.domain : initial.analysis.domain;
+      const confirmedDomain = verdict?.domain;
+      const domain = confirmedDomain === 'chat' || Object.hasOwn(DOMAIN_PATTERNS, confirmedDomain)
+        ? confirmedDomain
+        : initial.analysis.domain;
       const level = ['low', 'medium', 'high'].includes(verdict?.difficulty) ? verdict.difficulty : initial.analysis.difficulty.level;
       if ((Number(verdict?.confidence) || 0) < 0.65) return { ...initial, confirmation: { attempted: true, accepted: false } };
       const analysis = { ...initial.analysis, domain, difficulty: { ...initial.analysis.difficulty, level }, needsTools: Boolean(verdict.needsTools), reasons: [...initial.analysis.reasons, 'classificacao-confirmada'] };

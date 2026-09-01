@@ -730,6 +730,7 @@ export function createNexoRuntime({
               difficulty: adaptiveRoute.analysis.difficulty.level,
               complexity: adaptiveRoute.analysis.complexity?.level,
               source: adaptiveRoute.source,
+              confirmation: adaptiveRoute.confirmation || null,
               reasons: adaptiveRoute.analysis.reasons,
             }
           : null,

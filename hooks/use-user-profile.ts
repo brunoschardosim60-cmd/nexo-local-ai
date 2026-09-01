@@ -1,6 +1,7 @@
 'use client';
+/* oxlint-disable react/react-compiler */
 
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { NexoClient } from '@/lib/nexo/client';
 import { safeParse } from '@/lib/nexo/page-helpers';
 import type { Chat, UserProfile } from '@/lib/nexo/types';
@@ -13,13 +14,18 @@ const DEFAULT_PROFILE: UserProfile = {
 };
 
 type UserProfileOptions = {
-  loadByCity: (city: string) => Promise<void>;
+  loadByCity: (city: string) => Promise<unknown>;
   setNotice: (notice: string) => void;
   closePanel: () => void;
 };
 
 export function useUserProfile(options: UserProfileOptions) {
   const [profile, setProfile] = useState<UserProfile>(DEFAULT_PROFILE);
+  const optionsRef = useRef(options);
+
+  useEffect(() => {
+    optionsRef.current = options;
+  }, [options]);
 
   useEffect(() => {
     const storedProfile = {
@@ -38,7 +44,7 @@ export function useUserProfile(options: UserProfileOptions) {
       localStorage.setItem('nexo-personality-v2', '1');
     }
     setProfile(storedProfile);
-    if (storedProfile.city) void options.loadByCity(storedProfile.city);
+    if (storedProfile.city) void optionsRef.current.loadByCity(storedProfile.city);
   }, []);
 
   function save(

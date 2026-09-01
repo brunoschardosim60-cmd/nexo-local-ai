@@ -21,47 +21,25 @@ export default function Home() {
   const composer = useComposerState();
   const {
     mode,
-    setMode,
     effort,
     setEffort,
     imageQuality,
-    setImageQuality,
     prompt,
     setPrompt,
     loading,
     setLoading,
-    activityLabel,
     setActivityLabel,
-    notice,
     setNotice,
     webSearch,
-    setWebSearch,
-    dragActive,
     setDragActive,
   } = composer;
   const ui = useInterfaceState();
   const {
-    mounted,
-    profileOpen,
     setProfileOpen,
-    securityOpen,
-    setSecurityOpen,
-    personalOpen,
-    setPersonalOpen,
-    capabilityOpen,
-    setCapabilityOpen,
-    commandOpen,
-    setCommandOpen,
-    mobileOpen,
     setMobileOpen,
-    selectedArtifact,
-    setSelectedArtifact,
-    theme,
-    toggleTheme,
   } = ui;
   const clock = useClockAndWeather();
-  const { currentTime, weather, weatherStatus, loadByCity, useDeviceLocation } =
-    clock;
+  const { weather, loadByCity } = clock;
   const userProfile = useUserProfile({
     loadByCity,
     setNotice,
@@ -80,11 +58,8 @@ export default function Home() {
     setDocuments,
     attachments,
     setAttachments,
-    chatSearch,
-    setChatSearch,
     activeChat,
     history,
-    visibleChats,
     persistChats,
     mergeRemoteChats,
   } = sessions;
@@ -95,7 +70,6 @@ export default function Home() {
   const {
     online: agentOnline,
     token: agentToken,
-    health: agentHealth,
     actionLoading,
     setActionLoading,
     setOnline: setAgentOnline,
@@ -113,7 +87,6 @@ export default function Home() {
     onDragChange: setDragActive,
     onNotice: setNotice,
   });
-  const { fileInput, addDocuments, handleDrop, handlePaste } = files;
   const actions = useAgentActions({
     activeChat,
     chats,
@@ -125,12 +98,6 @@ export default function Home() {
     persistChats,
     setNotice,
   });
-  const {
-    runAction,
-    decideTaskPermission,
-    refreshAgentTask,
-    controlAgentTask,
-  } = actions;
 
   const voice = useVoiceMode({
     agentOnline,
@@ -141,18 +108,6 @@ export default function Home() {
     onSubmit: (value) => void askNexo(value, 'voice'),
     onNotice: setNotice,
   });
-  const {
-    listening,
-    voiceOutput,
-    voiceModeOpen,
-    voiceConversation,
-    voiceInterim,
-    voiceCaption,
-    voiceOutputLevel,
-    voicePreviewState,
-    voicePreviewLevel,
-    eyeState: voiceEyeState,
-  } = voice.state;
 
   loadingRef.current = loading;
 

@@ -1,8 +1,8 @@
 'use client';
+/* oxlint-disable react/react-compiler jsx-a11y/no-noninteractive-element-interactions */
 
 import type {
   Dispatch,
-  MutableRefObject,
   RefObject,
   SetStateAction,
 } from 'react';
@@ -37,8 +37,8 @@ type NexoPageViewProps = {
   profile: UserProfile;
   setProfile: Dispatch<SetStateAction<UserProfile>>;
   messagesEnd: RefObject<HTMLDivElement | null>;
-  requestController: MutableRefObject<AbortController | null>;
-  loadingRef: MutableRefObject<boolean>;
+  requestController: RefObject<AbortController | null>;
+  loadingRef: RefObject<boolean>;
   onCreateChat: () => void;
   onDeleteChat: (id: string) => void;
   onOpenMemory: () => Promise<void>;
@@ -61,7 +61,6 @@ export function NexoPageView(props: NexoPageViewProps) {
     prompt,
     setPrompt,
     loading,
-    setLoading,
     activityLabel,
     notice,
     setNotice,
@@ -72,36 +71,22 @@ export function NexoPageView(props: NexoPageViewProps) {
   } = props.composer;
   const {
     mounted,
-    profileOpen,
     setProfileOpen,
-    securityOpen,
     setSecurityOpen,
-    personalOpen,
     setPersonalOpen,
-    capabilityOpen,
-    setCapabilityOpen,
-    commandOpen,
     setCommandOpen,
-    mobileOpen,
     setMobileOpen,
-    selectedArtifact,
     setSelectedArtifact,
     theme,
     toggleTheme,
   } = props.ui;
   const {
-    chats,
-    activeChatId,
-    setActiveChatId,
     documents,
     setDocuments,
     attachments,
     setAttachments,
-    chatSearch,
-    setChatSearch,
     activeChat,
     history,
-    visibleChats,
   } = props.sessions;
   const { currentTime, weather, weatherStatus, useDeviceLocation } =
     props.clock;
@@ -121,22 +106,13 @@ export function NexoPageView(props: NexoPageViewProps) {
   const {
     listening,
     voiceOutput,
-    speaking,
     voiceModeOpen,
-    voiceConversation,
-    voiceInterim,
-    voiceCaption,
-    voiceOutputLevel,
-    voicePreviewState,
-    voicePreviewLevel,
     eyeState: voiceEyeState,
   } = props.voice.state;
   const { profile, setProfile, messagesEnd, requestController, loadingRef } =
     props;
   const voice = props.voice;
   const memory = props.memory;
-  const createChat = props.onCreateChat;
-  const deleteChat = props.onDeleteChat;
   const openMemoryCenter = props.onOpenMemory;
   const changeEffort = props.onChangeEffort;
   const download = props.onDownload;
@@ -284,7 +260,6 @@ export function NexoPageView(props: NexoPageViewProps) {
       <NexoOverlays
         ui={props.ui}
         composer={props.composer}
-        sessions={props.sessions}
         connection={props.connection}
         memory={memory}
         voice={voice}
@@ -293,8 +268,6 @@ export function NexoPageView(props: NexoPageViewProps) {
         sidebar={sidebar}
         requestController={requestController}
         loadingRef={loadingRef}
-        onCreateChat={createChat}
-        onAsk={askNexo}
         onSaveProfile={props.onSaveProfile}
         onResetPersonality={props.onResetPersonality}
       />

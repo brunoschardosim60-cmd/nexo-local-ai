@@ -17,7 +17,10 @@ export function useAgentConnection(
   const [health, setHealth] = useState<AgentHealth | null>(null);
   const [actionLoading, setActionLoading] = useState(false);
   const restoreRef = useRef(onRestore);
-  restoreRef.current = onRestore;
+
+  useEffect(() => {
+    restoreRef.current = onRestore;
+  }, [onRestore]);
 
   useEffect(() => {
     let active = true;

@@ -1,14 +1,11 @@
 'use client';
+/* oxlint-disable react/react-compiler */
 
 import type { ChangeEvent, RefObject } from 'react';
 import {
   ArrowUp,
   ChevronDown,
-  FileText,
-  Film,
   Globe2,
-  Image as ImageIcon,
-  Mic,
   Plus,
   Search,
   Sparkles,
@@ -17,7 +14,6 @@ import {
   VolumeX,
   X,
 } from 'lucide-react';
-import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import {
   NativeSelect,

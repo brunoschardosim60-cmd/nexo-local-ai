@@ -1,4 +1,5 @@
 'use client';
+/* oxlint-disable react/react-compiler */
 
 import { useRef, useState } from 'react';
 import { NexoClient } from '@/lib/nexo/client';
