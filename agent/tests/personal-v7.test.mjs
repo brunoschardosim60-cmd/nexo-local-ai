@@ -49,6 +49,28 @@ test('proatividade é opt-in, deduplica e respeita precisão, foco e orçamento'
   store.updateSettings({ focusMode: true }); assert.equal(proactivity.deliver().reason, 'focus-mode');
 }));
 
+test('proatividade aprende com sugestões descartadas e atendidas', () => fixture(async ({ store, proactivity }) => {
+  const baseRule = { pattern: 'goal.stalled', importance: 0.7, confidence: 0.8 };
+  const record = (status, index) => {
+    const suggestion = store.putSuggestion({
+      kind: 'stale', title: `Objetivo parado ${index}`, message: 'Sem avanço recente.',
+      importance: 0.7, confidence: 0.8, reason: 'feedback de teste', source: 'goal.stalled',
+      sourceEventId: `evt-${status}-${index}`, action: { command: 'resume-goal' }, dedupeKey: `${status}-${index}`,
+    });
+    store.updateSuggestion(suggestion.id, status);
+  };
+  for (let index = 0; index < 5; index += 1) record('DISMISSED', index);
+  const discouraged = proactivity.learnedRule(baseRule);
+  assert.equal(discouraged.learning.samples, 5);
+  assert.ok(discouraged.learning.adjustment < 0);
+  assert.ok(discouraged.importance < baseRule.importance);
+
+  for (let index = 0; index < 12; index += 1) record('ACTED', index);
+  const encouraged = proactivity.learnedRule(baseRule);
+  assert.ok(encouraged.learning.engagement > 0.5);
+  assert.ok(encouraged.importance > baseRule.importance);
+}));
+
 test('ACT exige confirmação explícita e capabilities limitadas', () => fixture(async ({ proactivity }) => {
   assert.throws(() => proactivity.createTrigger({ name: 'Rodar testes', eventPattern: 'project.changed', action: { objective: 'npm test' }, policy: 'ACT' }), /confirmação explícita/);
   const trigger = proactivity.createTrigger({ name: 'Rodar testes', eventPattern: 'project.changed', action: { objective: 'npm test' }, policy: 'ACT', userConfirmed: true, conditions: { userApproved: true }, capabilities: ['code.validate'] }); assert.equal(trigger.policy, 'ACT');
