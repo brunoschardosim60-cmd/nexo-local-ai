@@ -133,7 +133,7 @@ export function createDatabase(dataDir) {
     )`,
     `CREATE TABLE IF NOT EXISTS media_jobs (
       id TEXT PRIMARY KEY, kind TEXT NOT NULL, status TEXT NOT NULL, priority INTEGER NOT NULL,
-      input_json TEXT NOT NULL, artifact_id TEXT, error TEXT, created_at TEXT NOT NULL,
+      input_json TEXT NOT NULL, result_json TEXT, artifact_id TEXT, error TEXT, created_at TEXT NOT NULL,
       started_at TEXT, completed_at TEXT, cancelled_at TEXT
     )`,
     `CREATE TABLE IF NOT EXISTS performance_samples (
@@ -259,6 +259,8 @@ export function createDatabase(dataDir) {
   if (!toolRunColumns.has('output_summary_json')) db.prepare('ALTER TABLE tool_runs ADD COLUMN output_summary_json TEXT').run();
   const runtimeEventColumns = new Set(db.prepare('PRAGMA table_info(runtime_events)').all().map(column => column.name));
   if (!runtimeEventColumns.has('trust')) db.prepare("ALTER TABLE runtime_events ADD COLUMN trust TEXT NOT NULL DEFAULT 'TRUSTED'").run();
+  const mediaJobColumns = new Set(db.prepare('PRAGMA table_info(media_jobs)').all().map(column => column.name));
+  if (!mediaJobColumns.has('result_json')) db.prepare('ALTER TABLE media_jobs ADD COLUMN result_json TEXT').run();
   db.prepare('INSERT INTO memories_fts (id, kind, content) SELECT m.id, m.kind, m.content FROM memories m WHERE NOT EXISTS (SELECT 1 FROM memories_fts f WHERE f.id = m.id)').run();
   db.prepare('INSERT INTO document_chunks_fts (id, source, content) SELECT d.id, d.source, d.content FROM document_chunks d WHERE NOT EXISTS (SELECT 1 FROM document_chunks_fts f WHERE f.id = d.id)').run();
   db.exec('PRAGMA optimize');
@@ -656,10 +658,10 @@ export function createDatabase(dataDir) {
     const record = { id: randomUUID(), kind, status: 'queued', priority, input, createdAt: new Date().toISOString() };
     db.prepare('INSERT INTO media_jobs (id, kind, status, priority, input_json, created_at) VALUES (?, ?, ?, ?, ?, ?)').run(record.id, kind, record.status, priority, JSON.stringify(input), record.createdAt); return getMediaJob(record.id);
   }
-  function getMediaJob(id) { const row = db.prepare('SELECT * FROM media_jobs WHERE id = ?').get(id); return row ? { id: row.id, kind: row.kind, status: row.status, priority: row.priority, input: json(row.input_json, {}), artifactId: row.artifact_id, error: row.error, createdAt: row.created_at, startedAt: row.started_at, completedAt: row.completed_at, cancelledAt: row.cancelled_at } : null; }
+  function getMediaJob(id) { const row = db.prepare('SELECT * FROM media_jobs WHERE id = ?').get(id); return row ? { id: row.id, kind: row.kind, status: row.status, priority: row.priority, input: json(row.input_json, {}), result: json(row.result_json), artifactId: row.artifact_id, error: row.error, createdAt: row.created_at, startedAt: row.started_at, completedAt: row.completed_at, cancelledAt: row.cancelled_at } : null; }
   function updateMediaJob(id, patch = {}) {
     const current = getMediaJob(id); if (!current) throw new Error('Job de mídia não encontrado.'); const next = { ...current, ...patch };
-    db.prepare('UPDATE media_jobs SET status=?, artifact_id=?, error=?, started_at=?, completed_at=?, cancelled_at=? WHERE id=?').run(next.status, next.artifactId || null, next.error || null, next.startedAt || null, next.completedAt || null, next.cancelledAt || null, id); return getMediaJob(id);
+    db.prepare('UPDATE media_jobs SET status=?, result_json=?, artifact_id=?, error=?, started_at=?, completed_at=?, cancelled_at=? WHERE id=?').run(next.status, next.result == null ? null : JSON.stringify(next.result), next.artifactId || null, next.error || null, next.startedAt || null, next.completedAt || null, next.cancelledAt || null, id); return getMediaJob(id);
   }
   function listMediaJobs(limit = 100) { return db.prepare('SELECT id FROM media_jobs ORDER BY priority ASC, created_at DESC LIMIT ?').all(Math.max(1, Math.min(Number(limit) || 100, 500))).map(row => getMediaJob(row.id)); }
   function addPerformanceSample(sample) {

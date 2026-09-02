@@ -36,7 +36,7 @@ Perguntas determinísticas não acionam modelo. Conversa simples usa o 3B com pr
 
 O chat rápido preserva seis mensagens recentes e um `ConversationState` pequeno, persistido no SQLite e separado da memória semântica. O estado mantém o nome do usuário, nome canônico `Nexo`, apelido escolhido pelo usuário, tópico, referente atual, tom, correção recente e respostas sociais recentes. Perguntas como `e o seu?` são resolvidas nesse estado antes de qualquer RAG; por isso fatos locais simples não pagam a latência da busca semântica. Respostas sociais passam por verificação de identidade, papéis, repetição e sanidade. O fallback grounded só entra quando a geração contradiz os fatos autoritativos.
 
-O Core registra as tools dinamicamente. A inteligência de código usa AST TypeScript/JavaScript, declarações, chamadas e referências textuais; ainda não possui Tree-sitter, LSP ou call graph semântico completo. Debugging mantém hipóteses e experimentos persistentes. A pesquisa pode decompor perguntas e construir uma matriz multi-fonte de evidências, cobertura, datas e lacunas. Wikipedia, OpenAlex e Stack Overflow não exigem chave paga; toda chamada externa continua dependendo de aprovação. O modelo `qwen2.5vl:3b` interpreta imagens localmente. Geração raster usa Stable Diffusion WebUI/Forge quando esse provider estiver instalado e ativo; se não estiver, a UI informa a indisponibilidade e não fabrica um SVG como resultado.
+O Core registra as tools dinamicamente. A inteligência de código usa AST TypeScript/JavaScript, declarações, chamadas e referências textuais; ainda não possui Tree-sitter, LSP ou call graph semântico completo. Debugging mantém hipóteses e experimentos persistentes. A pesquisa pode decompor perguntas e construir uma matriz multi-fonte de evidências, cobertura, datas e lacunas. Wikipedia, OpenAlex e Stack Overflow não exigem chave paga; toda chamada externa continua dependendo de aprovação. O modelo `qwen2.5vl:3b` interpreta imagens localmente. Geração raster usa a API Stable Diffusion WebUI/Forge/A1111; neste PC, o setup recomendado instala o fork AMD/DirectML e DreamShaper 8 no disco `D:`. Se o provider não estiver ativo, a UI informa a indisponibilidade e não fabrica um SVG como resultado.
 
 O V7 adiciona o painel **Meu dia** e a paleta `Ctrl+K`. Objetivos, tarefas, prazos, projetos conhecidos, estudo e eventos observáveis ficam separados da personalidade. Proatividade e notificações começam desligadas; `SUGGEST`, `ASK` e `ACT` são políticas distintas, e `ACT` exige confirmação explícita mais capabilities limitadas. Modo foco, quiet hours, orçamento de interrupções, repetição espaçada e briefs são controlados pelo usuário. O Nexo não afirma ter “visto” algo sem evento, tool ou memória que sustente a afirmação.
 
@@ -57,7 +57,8 @@ Veja a arquitetura-base em [`docs/NEXO-CORE.md`](docs/NEXO-CORE.md) e os relató
 | Stable | Core único, SQLite, INSTANT, filesystem protegido, capability registry, chat local |
 | Functional | FAST/DEEP, agent loop/DAG, browser, RAG, memória híbrida, visão condicionada ao modelo, skills/MCP sem servidor conectado |
 | Partial | sandbox sem isolamento de SO, debugging avançado, multi-agent, knowledge graph, acessibilidade auditada parcialmente, STT ainda dependente do navegador |
-| Scaffold/unavailable | imagem sem Forge ativo, vídeo desativado |
+| Funcional local | imagem SD 1.5 por WebUI AMD/DirectML, visão Qwen separada |
+| Scaffold/unavailable | vídeo desativado; edição depende do suporte do checkpoint/provider |
 
 A matriz completa, evidências e limitações ficam em [`docs/master-audit/CAPABILITY-MATRIX.md`](docs/master-audit/CAPABILITY-MATRIX.md). A marca exibida é centralizada em `lib/nexo/brand.ts`; `Nexo` continua sendo o nome atual e nenhum rebranding foi imposto.
 
@@ -106,6 +107,8 @@ npm run eval:false-memory
 npm run eval:knowledge
 npm run eval:personal
 npm run eval:multimodal
+npm run image:setup
+npm run image:start
 npm run eval:extensions
 npm run eval:coding-browser
 npm run eval:conversation

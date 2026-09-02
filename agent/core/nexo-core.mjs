@@ -361,6 +361,11 @@ export function createNexoCore(overrides = {}) {
     vision,
     enabled: config.featureFlags.imageGeneration,
     autoRegeneration: config.featureFlags.autoRegeneration,
+    beforeGenerate: async () => {
+      try {
+        await (overrides.fetchImpl || globalThis.fetch)(`${config.ollamaUrl}/api/generate`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ model: config.visionModel, keep_alive: 0 }) });
+      } catch {}
+    },
   });
   const audio = createAudioRuntime({
     provider: audioProvider,
@@ -388,7 +393,7 @@ export function createNexoCore(overrides = {}) {
     resourceManager: resources,
     handlers: {
       image: {
-        resources: { requiredRamMB: 2500, requiredVramMB: 3500 },
+        resources: { requiredRamMB: 512, requiredVramMB: 3000 },
         run: (input, options) => image.generate(input, options),
       },
       video: {

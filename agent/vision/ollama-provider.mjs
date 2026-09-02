@@ -2,6 +2,34 @@ import { readFile } from 'node:fs/promises';
 import { extname } from 'node:path';
 
 const IMAGE_EXTENSIONS = new Set(['.png', '.jpg', '.jpeg', '.webp', '.gif', '.bmp']);
+const GENERATION_EVALUATION_SCHEMA = {
+  type: 'object', additionalProperties: false,
+  required: ['verdict', 'scores', 'evidence', 'problems'],
+  properties: {
+    verdict: { type: 'string', enum: ['PASS', 'FAIL', 'UNCERTAIN'] },
+    scores: { type: 'object', additionalProperties: false, required: ['adherence', 'composition', 'artifacts', 'text'], properties: { adherence: { type: 'number', minimum: 0, maximum: 1 }, composition: { type: 'number', minimum: 0, maximum: 1 }, artifacts: { type: 'number', minimum: 0, maximum: 1 }, text: { type: 'number', minimum: 0, maximum: 1 } } },
+    evidence: { type: 'array', items: { type: 'string' }, maxItems: 12 },
+    problems: { type: 'array', items: { type: 'string' }, maxItems: 12 },
+  },
+};
+
+export function normalizeGenerationEvaluation(result, { prompt = '' } = {}) {
+  const verdict = String(result?.verdict || '').toUpperCase();
+  const validVerdict = ['PASS', 'FAIL', 'UNCERTAIN'].includes(verdict);
+  const clamp = value => Math.max(0, Math.min(1, Number(value) || 0));
+  const scores = { adherence: clamp(result?.scores?.adherence), composition: clamp(result?.scores?.composition), artifacts: clamp(result?.scores?.artifacts), text: clamp(result?.scores?.text) };
+  const evidence = Array.isArray(result?.evidence) ? result.evidence.map(String).slice(0, 12) : [];
+  const problems = Array.isArray(result?.problems) ? result.problems.map(String).slice(0, 12) : [];
+  const requestedPortuguese = /portugu[eê]s|pt-br/i.test(prompt);
+  const languageMismatch = requestedPortuguese && problems.some(item => /ingl[eê]s|idioma|language|ileg[ií]vel|sem sentido/i.test(item));
+  const suspiciousPerfectPass = verdict === 'PASS' && problems.length > 0 && Object.values(scores).every(score => score >= 0.99);
+  const normalizedVerdict = !validVerdict ? 'UNCERTAIN' : languageMismatch ? 'FAIL' : suspiciousPerfectPass ? 'UNCERTAIN' : verdict;
+  if (languageMismatch) scores.text = Math.min(scores.text, 0.25);
+  return {
+    verdict: normalizedVerdict, scores, evidence,
+    problems: [...problems, ...(!validVerdict ? ['O modelo de visão não escolheu um veredito válido.'] : []), ...(suspiciousPerfectPass && !languageMismatch ? ['Veredito rebaixado: scores perfeitos contradizem os problemas relatados.'] : [])],
+  };
+}
 
 export function createOllamaVisionProvider({ config, filesystem, fetchImpl = globalThis.fetch }) {
   let state = { available: null, checkedAt: null, error: null };
@@ -42,16 +70,16 @@ export function createOllamaVisionProvider({ config, filesystem, fetchImpl = glo
       // A análise ainda pode funcionar quando o provider não expõe /api/ps.
     }
   }
-  async function chat(images, prompt, { json = false, numPredict = 900 } = {}) {
+  async function chat(images, prompt, { json = false, format = null, numPredict = 900, transform = null } = {}) {
     const availability = state.available == null ? await probe() : state;
     if (!availability.available) throw new Error(`Vision indisponível: ${availability.error}`);
     await unloadCompetingModels();
     const encoded = await Promise.all(images.map(imageBase64)); const startedAt = performance.now();
-    const response = await fetchImpl(`${config.ollamaUrl}/api/chat`, { method: 'POST', headers: { 'content-type': 'application/json' }, signal: AbortSignal.timeout(120_000), body: JSON.stringify({ model: config.visionModel, stream: false, ...(json ? { format: 'json' } : {}), keep_alive: '45s', options: { temperature: 0.1, num_predict: numPredict, num_ctx: 2048 }, messages: [{ role: 'user', content: prompt, images: encoded }] }) });
+    const response = await fetchImpl(`${config.ollamaUrl}/api/chat`, { method: 'POST', headers: { 'content-type': 'application/json' }, signal: AbortSignal.timeout(120_000), body: JSON.stringify({ model: config.visionModel, stream: false, ...(json ? { format: format || 'json' } : {}), keep_alive: '45s', options: { temperature: 0.1, num_predict: numPredict, num_ctx: 2048 }, messages: [{ role: 'user', content: prompt, images: encoded }] }) });
     if (!response.ok) throw new Error(`Vision respondeu ${response.status}.`); const payload = await response.json(); const content = String(payload.message?.content || '').trim();
     if (!content) throw new Error('Vision não produziu análise.');
     if (!json) return { content, model: config.visionModel, provider: 'ollama-local', durationMs: performance.now() - startedAt };
-    try { return { result: JSON.parse(content.replace(/^```json\s*|```$/g, '')), model: config.visionModel, provider: 'ollama-local', durationMs: performance.now() - startedAt }; } catch { throw new Error('Vision não retornou JSON válido.'); }
+    try { const parsed = JSON.parse(content.replace(/^```json\s*|```$/g, '')); return { result: transform ? transform(parsed) : parsed, model: config.visionModel, provider: 'ollama-local', durationMs: performance.now() - startedAt }; } catch { throw new Error('Vision não retornou JSON válido.'); }
   }
   return {
     id: 'ollama-vision', capabilities: ['analyzeImage', 'compareImages', 'describeImage', 'extractVisualInformation', 'evaluateGeneration'], probe,
@@ -59,7 +87,7 @@ export function createOllamaVisionProvider({ config, filesystem, fetchImpl = glo
     describeImage(image) { return chat([image], 'Descreva objetivamente tudo que é visível nesta imagem em português brasileiro. Não invente detalhes ocultos.', { numPredict: 420 }); },
     extractVisualInformation(image, schema = {}) { return chat([image], `Extraia informação visual segundo este schema e responda apenas JSON: ${JSON.stringify(schema).slice(0, 4000)}`, { json: true, numPredict: 600 }); },
     compareImages(left, right, criteria = []) { return chat([left, right], `Compare a primeira e a segunda imagem. Critérios: ${criteria.join(', ') || 'conteúdo, composição, texto, identidade e diferenças'}. Separe semelhanças, mudanças e incertezas.`, { numPredict: 600 }); },
-    evaluateGeneration(image, prompt, criteria = []) { return chat([image], `Avalie a imagem contra o prompt: ${prompt}. Critérios: ${criteria.join(', ') || 'aderência, composição, artefatos, anatomia, texto e restrições'}. Responda JSON {"verdict":"PASS|FAIL|UNCERTAIN","scores":{"adherence":0,"composition":0,"artifacts":0,"text":0},"evidence":[],"problems":[]}.`, { json: true, numPredict: 600 }); },
+    evaluateGeneration(image, prompt, criteria = []) { return chat([image], `Avalie a imagem contra o prompt: ${prompt}. Critérios: ${criteria.join(', ') || 'aderência, composição, artefatos, anatomia, texto e restrições'}. Escolha exatamente um veredito: PASS se atende, FAIL se há falha importante, ou UNCERTAIN se não houver evidência suficiente. Dê scores reais entre 0 e 1 e cite evidências visíveis.`, { json: true, format: GENERATION_EVALUATION_SCHEMA, transform: result => normalizeGenerationEvaluation(result, { prompt }), numPredict: 600 }); },
     health: () => ({ provider: 'Ollama local', model: config.visionModel, ...state, capabilities: ['analyze', 'compare', 'describe', 'extract', 'evaluate'] }),
   };
 }

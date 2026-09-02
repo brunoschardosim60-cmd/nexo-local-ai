@@ -8,6 +8,9 @@ $connection = Get-NetTCPConnection -LocalPort 7331 -State Listen -ErrorAction Si
 if ($connection) { Write-Output 'Nexo Core já está ativo.'; exit 0 }
 
 $env:NEXO_TTS_PROVIDER_URL = 'http://127.0.0.1:7332/synthesize'
+$env:NEXO_IMAGE_PROVIDER_URL = 'http://127.0.0.1:7860'
+$env:NEXO_IMAGE_MODEL_FAMILY = 'sd15'
+$env:NEXO_VISION_MODEL = 'qwen2.5vl:3b'
 Start-Process -FilePath $nodePath -ArgumentList @('local-agent.mjs') -WorkingDirectory $projectRoot -WindowStyle Hidden -RedirectStandardOutput $stdoutPath -RedirectStandardError $stderrPath
 for ($attempt = 0; $attempt -lt 40; $attempt += 1) {
   Start-Sleep -Milliseconds 250

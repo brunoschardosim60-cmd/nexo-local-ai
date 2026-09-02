@@ -27,6 +27,8 @@ yarn-error.log*
 .pnpm-debug.log*
 .nexo-agent.stdout.log
 .nexo-agent.stderr.log
+.nexo-dev.stdout.log
+.nexo-dev.stderr.log
 
 # local environment
 .env*
@@ -45,6 +47,7 @@ next-env.d.ts
 /data/*.db-*
 /data/*.log
 /data/logs/
+/data/runtime/
 /data/artifacts/
 /data/sessions/
 /data/vectors/

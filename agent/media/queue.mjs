@@ -17,7 +17,7 @@ export function createMediaQueue({ database, resourceManager, handlers = {}, con
       running += 1; const controller = new AbortController(); controllers.set(current.id, controller); resourceManager.acquire({ id: current.id, kind: current.kind, priority: current.priority });
       publish(database.updateMediaJob(current.id, { status: 'running', startedAt: new Date().toISOString(), error: null }));
       void Promise.resolve(handler.run(current.input, { signal: controller.signal, jobId: current.id })).then(result => {
-        if (database.getMediaJob(current.id)?.status !== 'cancelled') publish(database.updateMediaJob(current.id, { status: 'completed', artifactId: result?.artifact?.id || result?.id || null, completedAt: new Date().toISOString() }));
+        if (database.getMediaJob(current.id)?.status !== 'cancelled') publish(database.updateMediaJob(current.id, { status: 'completed', result, artifactId: result?.artifact?.id || result?.id || null, completedAt: new Date().toISOString() }));
       }).catch(error => {
         if (database.getMediaJob(current.id)?.status !== 'cancelled') publish(database.updateMediaJob(current.id, { status: 'failed', error: String(error?.message || error), completedAt: new Date().toISOString() }));
       }).finally(() => { controllers.delete(current.id); resourceManager.release(current.id); running -= 1; schedule(); });
