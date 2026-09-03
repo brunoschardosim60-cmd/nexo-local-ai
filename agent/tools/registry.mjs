@@ -2,7 +2,7 @@ import { assertSchemaDefinition, validateSchema } from './contracts.mjs';
 
 export function createToolRegistry(toolDefinitions) {
   const tools = new Map(); const aliases = new Map();
-  for (const tool of toolDefinitions) {
+  function register(tool) {
     if (!tool?.name || tools.has(tool.name)) throw new Error(`Ferramenta duplicada ou inválida: ${tool?.name || 'sem nome'}`);
     const inputSchema = tool.inputSchema || tool.schema || { type: 'object' };
     assertSchemaDefinition(inputSchema, tool.name);
@@ -12,8 +12,11 @@ export function createToolRegistry(toolDefinitions) {
       if (aliases.has(alias) || tools.has(alias)) throw new Error(`Alias duplicado: ${alias}`);
       aliases.set(alias, normalized.name);
     }
+    return normalized;
   }
+  for (const tool of toolDefinitions) register(tool);
   return {
+    register,
     get(name) { const canonical = aliases.get(name) || name; const tool = tools.get(canonical); if (!tool) throw new Error(`Ferramenta desconhecida: ${name}`); return tool; },
     describe() { return [...tools.values()].map(({ name, description, risk, inputSchema, version }) => ({ name, description, risk, schema: inputSchema, version })); },
     discover({ objective = '', namespaces = [], limit = 14 } = {}) {

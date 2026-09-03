@@ -80,7 +80,7 @@ test('Nexo Core expõe runtime completo e remove segredos do contexto', async ()
   const core = createNexoCore({ projectRoot: directory, workspace: directory, dataDir, autoResume: false, fetchImpl });
   try {
     const health = core.health(); assert.equal(health.runtime, 'Nexo Core'); assert.equal(health.taskGraph, true); assert.equal(health.checkpoints, true);
-    assert.ok(health.tools.some(tool => tool.name === 'filesystem.patch')); assert.ok(health.tools.some(tool => tool.name === 'repository.map')); assert.ok(health.tools.some(tool => tool.name === 'git.status'));
+    assert.ok(health.tools.some(tool => tool.name === 'filesystem.patch')); assert.ok(health.tools.some(tool => tool.name === 'repository.map')); assert.ok(health.tools.some(tool => tool.name === 'git.status')); assert.ok(health.tools.some(tool => tool.name === 'site.visual_verify'));
     await core.memory.remember('Bruno prefere o tema violeta escuro.', { kind: 'user', confidence: 0.95, source: 'test' });
     assert.match((await core.memory.search('preferência violeta', { limit: 1 }))[0].content, /violeta/);
     assert.equal(redactSecrets('token=abcdefghijklmnop'), '[SEGREDO REMOVIDO]');

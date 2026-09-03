@@ -55,6 +55,17 @@ test('Planner usa falha e busca anteriores sem chamar modelo para decisões óbv
   assert.equal(modelCalls, 0);
 });
 
+test('Planner trata criação de site como coding e exige verificação visual', async () => {
+  const specialists = createSpecialistRegistry();
+  const planner = createPlanner({ ollama: { async json() { throw new Error('fallback'); } }, router: { route: () => ({ model: 'local', analysis: { difficulty: { level: 'low' } } }) }, specialists });
+  const plan = await planner.createPlan({ objective: 'crie um site de vendas no diretório loja', preferredSpecialist: specialists.suggest('crie um site de vendas'), tools: [], context: {} });
+  assert.equal(specialists.suggest('crie um site de vendas'), 'coding');
+  assert.equal(specialists.suggest('abra o site no navegador'), 'browser');
+  assert.match(specialists.prompt('coding', 'desenvolva uma landing page'), /mobile-first|hierarquia/i);
+  assert.ok(plan.some(step => /site\.visual_verify/.test(step.description)));
+  assert.ok(plan.every(step => step.assignedAgent === 'coding'));
+});
+
 test('Skills locais são descobertas, recuperadas e desativadas persistentemente', async () => {
   const directory = await mkdtemp(join(tmpdir(), 'nexo-skills-')); const root = join(directory, 'skills'); await mkdir(join(root, 'coding'), { recursive: true });
   await writeFile(join(root, 'coding', 'SKILL.md'), '---\nname: test-coding\ndescription: programação bugs testes\n---\n\nLeia antes de editar.\n', 'utf8');
@@ -100,7 +111,7 @@ test('cliente MCP stdio negocia, descobre e chama tools', async () => {
 });
 
 test('especialistas selecionam função sem conceder novas permissões', () => {
-  const specialists = createSpecialistRegistry(); assert.equal(specialists.suggest('pesquise artigos e fontes'), 'research'); assert.equal(specialists.suggest('corrija o bug e rode testes'), 'coding'); assert.match(specialists.prompt('browser'), /permissões/);
+  const specialists = createSpecialistRegistry(); assert.equal(specialists.suggest('pesquise artigos e fontes'), 'research'); assert.equal(specialists.suggest('corrija o bug e rode testes'), 'coding'); assert.equal(specialists.suggest('crie um website profissional'), 'coding'); assert.match(specialists.prompt('browser'), /permissões/);
   assert.equal(permissionPolicy({ name: 'filesystem.read', risk: 'read' }, { path: '.env.local' }).decision, 'deny');
 });
 

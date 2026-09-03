@@ -68,7 +68,7 @@ test('Browser V2 executa página real, interação verificada, console/rede e sc
   const provider = createPlaywrightBrowserProvider({ workspace: directory, database, research: { fetchPage: async url => ({ url }) }, browserPath });
   try {
     const opened = await provider.navigate({ url: `http://127.0.0.1:${address.port}` }); assert.equal(opened.title, '');
-    const clicked = await provider.action('click', { sessionId: opened.sessionId, selector: '#go', expectChange: true }); assert.equal(clicked.changed, true); assert.match(clicked.after.text, /feito/);
-    const shot = await provider.screenshot({ sessionId: opened.sessionId, path: 'artifacts/eval.png' }, { taskId: null }); assert.ok(shot.bytes > 0); assert.equal(shot.artifact.provider, 'playwright');
+    const clicked = await provider.action('click', { sessionId: opened.sessionId, selector: '#go', expectChange: true }); assert.equal(clicked.changed, true); assert.match(clicked.after.text, /feito/); assert.equal(clicked.after.layoutDiagnostics.horizontalOverflow, false);
+    const shot = await provider.screenshot({ sessionId: opened.sessionId, path: 'artifacts/eval.png' }, { taskId: null }); assert.ok(shot.bytes > 0); assert.equal(shot.artifact.provider, 'playwright'); assert.equal(shot.width, 1280); assert.equal(shot.height, 800);
   } finally { await provider.closeAll(); await new Promise(resolve => server.close(resolve)); database.db.close(); await rm(directory, { recursive: true, force: true }); }
 });

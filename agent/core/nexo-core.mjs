@@ -64,6 +64,7 @@ import { createSandbox } from '../safety/sandbox.mjs';
 import { createSkillEngine } from '../skills/skill-engine.mjs';
 import { createMultiAgentCoordinator } from '../specialists/coordinator.mjs';
 import { createSpecialistRegistry } from '../specialists/registry.mjs';
+import { createSiteVisualVerifier } from '../sites/visual-verifier.mjs';
 import { createFilesystemTools } from '../tools/filesystem.mjs';
 import { createGitTools } from '../tools/git.mjs';
 import { createProjectTools } from '../tools/project.mjs';
@@ -355,6 +356,8 @@ export function createNexoCore(overrides = {}) {
     provider: visionProvider,
     enabled: config.featureFlags.vision,
   });
+  const siteVisualVerifier = createSiteVisualVerifier({ browser: browserAutomation, vision, filesystem });
+  for (const definition of siteVisualVerifier.definitions) registry.register(definition);
   const image = createImageRuntime({
     provider: imageProvider,
     artifacts,
@@ -557,6 +560,7 @@ export function createNexoCore(overrides = {}) {
     research,
     browser,
     browserAutomation,
+    siteVisualVerifier,
     coding,
     skills,
     specialists,
@@ -628,6 +632,7 @@ export function createNexoCore(overrides = {}) {
             legacy: browser.health(),
             automation: browserAutomation.health(),
           },
+          siteVisualVerifier: siteVisualVerifier.health(),
           coding: coding.health(),
           skills: skills.health(),
           specialists: specialists.list(),

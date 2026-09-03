@@ -29,6 +29,7 @@ function observedRun(run) {
   }
   if (run.tool === 'browser.screenshot' && output?.path) return { summary: `Screenshot ${output.path} capturado em ${output.width}×${output.height}.`, evidence: [`Artefato: ${output.path} (${output.bytes} bytes)`] };
   if (run.tool === 'visual.verify' && output?.path) return { summary: `Screenshot ${output.valid ? 'validado' : 'reprovado'} estruturalmente.`, evidence: (output.checks || []).map(check => `${check.passed ? 'OK' : 'FALHA'}: ${check.name} — ${check.detail}`) };
+  if (run.tool === 'site.visual_verify') return { summary: `Site ${output?.verdict === 'PASS' ? 'aprovado' : 'reprovado'} visualmente em ${(output?.reports || []).map(report => report.viewport).join(' e ') || 'viewports solicitados'}.`, evidence: [...(output?.reports || []).map(report => `${report.viewport}: ${report.screenshot?.path} — ${report.evaluation?.result?.verdict || 'UNCERTAIN'}`), ...(output?.feedback || []).map(item => `Feedback: ${item}`)] };
   if (/^(?:image|video|audio)\./.test(run.tool) && (output?.artifact?.id || output?.artifactId)) return { summary: `Artefato de mídia gerado por ${output.artifact?.provider || output.provider || 'provider local'}.`, evidence: [`Artefato persistido: ${output.artifact?.id || output.artifactId}`] };
   if (run.tool === 'code.validate' && Array.isArray(output?.results)) return { summary: `Validação de código ${output.valid ? 'aprovada' : 'reprovada'}.`, evidence: output.results.map(item => `${item.check}: exit code ${item.exitCode}`) };
   if (run.tool === 'agents.delegate' && Array.isArray(output?.children)) return { summary: `${output.children.length} subtarefas delegadas em paralelo.`, evidence: output.children.map(item => `${item.assignedAgent}: ${item.objective} (${item.id})`) };
@@ -47,6 +48,7 @@ export function createEvaluator() {
       }
       if (action.tool === 'code.validate' && !execution.output?.valid) return { success: false, reason: 'Uma validação de código falhou.' };
       if (action.tool === 'visual.verify' && !execution.output?.valid) return { success: false, reason: 'O screenshot não passou nas verificações estruturais.' };
+      if (action.tool === 'site.visual_verify' && execution.output?.verdict !== 'PASS') return { success: false, reason: `A verificação visual do site retornou ${execution.output?.verdict || 'UNCERTAIN'}. ${execution.output?.autoCorrection?.instruction || (execution.output?.feedback || []).join(' ')}`.slice(0, 5000) };
       return { success: true, reason: action.successCriteria || 'Execução concluída.' };
     },
     async summarize(task, runs) {
@@ -56,11 +58,13 @@ export function createEvaluator() {
       const successfulCheck = completedRuns.some(run => (['run_command', 'shell.run'].includes(run.tool) && Number(run.output?.exitCode) === 0 && /(?:test|lint|build|typecheck|tsc|--check)/i.test(run.output?.command || '')) || (run.tool === 'code.validate' && run.output?.valid));
       const researchEvidence = completedRuns.some(run => ['research.search', 'web.search', 'research.fetch', 'web.fetch', 'browser.open', 'browser.follow'].includes(run.tool));
       const mediaEvidence = completedRuns.some(run => /^(?:image|video|audio)\./.test(run.tool) && (run.output?.artifact?.id || run.output?.artifactId));
+      const visualSiteEvidence = completedRuns.some(run => run.tool === 'site.visual_verify' && run.output?.verdict === 'PASS');
       const planCompleted = task.plan.length > 0 && task.plan.every(step => step.status === 'completed');
       const asksForMutation = includesObjective(task.objective, /\b(cri|corr|edit|implement|refator|alter|remov|adicion|constru|fac|ger)[a-z]*/);
       const asksForValidation = includesObjective(task.objective, /\b(test|valid|lint|build|compil|typecheck|verific|confir)[a-z]*/);
       const asksForResearch = includesObjective(task.objective, /\b(pesquis|investig|busc|procure|internet|web)[a-z]*/);
       const asksForMedia = includesObjective(task.objective, /\b(imagem|ilustra|foto|video|audio|voz|narra)[a-z]*/);
+      const asksForWebsite = includesObjective(task.objective, /\b(site|website|landing|pagina|homepage|loja|portfolio|interface web)\b/);
       const failedRuns = runs.filter(run => run.status === 'failed');
       const acceptanceCriteria = [
         { criterion: 'O plano terminou sem etapas pendentes.', met: planCompleted },
@@ -68,8 +72,9 @@ export function createEvaluator() {
         ...(asksForValidation || changedFiles ? [{ criterion: 'Uma validação relevante terminou com sucesso.', met: successfulCheck }] : []),
         ...(asksForResearch ? [{ criterion: 'A pesquisa produziu fontes ou páginas observadas.', met: researchEvidence }] : []),
         ...(asksForMedia ? [{ criterion: 'Um artefato de mídia real foi persistido.', met: mediaEvidence }] : []),
+        ...(asksForWebsite && asksForMutation ? [{ criterion: 'O site passou por verificação visual desktop e mobile.', met: visualSiteEvidence }] : []),
       ];
-      const hardFailure = !planCompleted || completedRuns.length === 0 || (asksForMutation && !changedFiles) || (asksForValidation && !successfulCheck) || (asksForResearch && !researchEvidence) || (asksForMedia && !mediaEvidence);
+      const hardFailure = !planCompleted || completedRuns.length === 0 || (asksForMutation && !changedFiles) || (asksForValidation && !successfulCheck) || (asksForResearch && !researchEvidence) || (asksForMedia && !mediaEvidence) || (asksForWebsite && asksForMutation && !visualSiteEvidence);
       const uncertain = !hardFailure && (failedRuns.length > 0 || (changedFiles && !successfulCheck));
       const verdict = hardFailure ? 'FAIL' : uncertain ? 'UNCERTAIN' : 'PASS';
       const validated = verdict === 'PASS';
