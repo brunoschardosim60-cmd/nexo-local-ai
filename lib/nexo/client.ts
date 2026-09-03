@@ -1,10 +1,22 @@
 import type { AgentHealth, AgentTask, BackgroundJob, Chat, ChatMessage, Effort, LocalAttachment, LocalDocument, MediaArtifact, MediaJob, NexoCapability, NexoMemory, NexoSkill, NexoWorkflow, PersonalDashboard, PersonalGoal, PersonalSearchResult, PersonalSettings, PersonalSuggestion, PersonalTask, PresenceState, RuntimeEvent, RuntimeImmediateResponse, RuntimeStreamEvent, UserProfile } from './types';
 
 export const NEXO_AGENT_URL = 'http://127.0.0.1:7331';
+export const NEXO_SESSION_EXPIRED_EVENT = 'nexo:session-expired';
+
+export class NexoHttpError extends Error {
+  constructor(message: string, readonly status: number) {
+    super(message);
+    this.name = 'NexoHttpError';
+  }
+}
 
 async function jsonResponse<T>(response: Response): Promise<T> {
   const data = await response.json() as T & { error?: string };
-  if (!response.ok) throw new Error(data.error || `Nexo Core respondeu ${response.status}.`);
+  if (!response.ok) {
+    if (response.status === 401 && typeof window !== 'undefined')
+      window.dispatchEvent(new Event(NEXO_SESSION_EXPIRED_EVENT));
+    throw new NexoHttpError(data.error || `Nexo Core respondeu ${response.status}.`, response.status);
+  }
   return data;
 }
 

@@ -264,7 +264,12 @@ const server = createServer(async (request, response) => {
     }
     return send(response, 404, { error: 'Rota não encontrada.' });
   } catch (error) {
-    audit(request.url || 'unknown', '', false, error instanceof Error ? error.message : 'Falha desconhecida.'); return send(response, 400, { error: error instanceof Error ? error.message : 'Falha desconhecida.' });
+    const message = error instanceof Error ? error.message : 'Falha desconhecida.';
+    const status = message === 'Sessão local não autorizada.' ? 401
+      : message === 'Origem não autorizada.' ? 403
+      : message === 'Limite de ações por minuto atingido.' ? 429
+      : 400;
+    audit(request.url || 'unknown', '', false, message); return send(response, status, { error: message });
   }
 });
 
