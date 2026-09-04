@@ -14,6 +14,7 @@
     "image:start": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/image/start-image-provider.ps1",
     "google:setup": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/google/setup-google-workspace-mcp.ps1",
     "google:auth": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/google/configure-google-oauth.ps1",
+    "google:import": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/google/import-google-oauth-json.ps1",
     "google:check": "node scripts/google/check-google-workspace-mcp.mjs",
     "test:agent": "node --test agent/tests/*.test.mjs",
     "test:ux": "node --test agent/tests/ux-ui-v2.test.mjs",

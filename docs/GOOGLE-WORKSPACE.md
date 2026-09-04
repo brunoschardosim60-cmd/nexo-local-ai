@@ -38,6 +38,14 @@ npm run google:auth
 
 Informe o Client ID e o Client Secret no terminal local. O segredo não é ecoado e é salvo em `.nexo-integrations/google-workspace-mcp/.env`, fora do Git e com ACL restrita ao usuário atual. Não cole o Client Secret no chat, em commits ou em `mcp-servers.json`.
 
+Se o Google Cloud forneceu um JSON para aplicativo de computador, importe-o sem copiar o segredo manualmente:
+
+```powershell
+npm run google:import -- "C:\caminho\client_secret_....json"
+```
+
+O importador salva o `.env`, move o JSON para `.credentials/oauth-client.json` e restringe ambos ao usuário atual.
+
 ## 4. Autorizar e verificar
 
 Reinicie o Nexo Core e execute:

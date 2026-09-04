@@ -24,6 +24,7 @@ try {
   $clientSecret = $null
 }
 
-icacls $environmentPath /inheritance:r /grant:r "${env:USERNAME}:(R,W)" | Out-Null
+$currentIdentity = [Security.Principal.WindowsIdentity]::GetCurrent().Name
+icacls $environmentPath /inheritance:r /grant:r "${currentIdentity}:(R,W)" | Out-Null
 Write-Host 'Credenciais salvas somente no runtime local ignorado pelo Git.'
 Write-Host 'Reinicie o Nexo Core e faça a primeira chamada Google para abrir o consentimento OAuth.'
