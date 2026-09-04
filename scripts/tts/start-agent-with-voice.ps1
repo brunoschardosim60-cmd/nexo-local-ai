@@ -8,6 +8,7 @@ $connection = Get-NetTCPConnection -LocalPort 7331 -State Listen -ErrorAction Si
 if ($connection) { Write-Output 'Nexo Core já está ativo.'; exit 0 }
 
 $env:NEXO_TTS_PROVIDER_URL = 'http://127.0.0.1:7332/synthesize'
+$env:NEXO_STT_PROVIDER_URL = 'http://127.0.0.1:7333/transcribe'
 $env:NEXO_IMAGE_PROVIDER_URL = 'http://127.0.0.1:7860'
 $env:NEXO_IMAGE_MODEL_FAMILY = 'sd15'
 $env:NEXO_VISION_MODEL = 'qwen2.5vl:3b'

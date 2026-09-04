@@ -56,3 +56,8 @@ next-env.d.ts
 /.nexo-artifacts/
 /.nexo-backups/
 /.nexo-tts/
+/.nexo-stt/
+.nexo-stt.stdout.log
+.nexo-stt.stderr.log
+__pycache__/
+*.pyc

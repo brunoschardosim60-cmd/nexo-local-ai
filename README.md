@@ -2,7 +2,7 @@
 
 > Produto local-first em consolidação. A auditoria master separa capacidade comprovada, parcial, scaffold e indisponível — sem transformar nomes de módulos em promessa.
 
-Runtime local-first para agentes pessoais, com interface web, memória persistente e modelos executados pelo Ollama. O Nexo oferece chat, programação, documentos, planilhas CSV, visão real, arquitetura de mídia com artefatos persistentes, voz neural local pelo Piper, pesquisa com fontes, navegação segura e tarefas autônomas com ferramentas protegidas.
+Runtime local-first para agentes pessoais, com interface web, memória persistente e modelos executados pelo Ollama. O Nexo oferece chat, programação, documentos, planilhas CSV, visão real, arquitetura de mídia com artefatos persistentes, voz neural local com Faster Whisper + Piper, pesquisa com fontes, navegação segura e tarefas autônomas com ferramentas protegidas.
 
 ## Arquitetura do agente
 
@@ -44,7 +44,7 @@ O V7 adiciona o painel **Meu dia** e a paleta `Ctrl+K`. Objetivos, tarefas, praz
 
 O V8 formaliza mensagens com texto, imagens, áudio, vídeo, documentos, frames de tela/câmera e metadata. O Modality Router combina engines, enquanto o Perception Engine preserva origem, horário e confiança de cada observação. O botão de presença reúne voz, captura pontual de tela e câmera sob consentimento explícito, exibe indicadores ativos e oferece kill switch. Frames iguais são ignorados e frames brutos não entram automaticamente na memória. Image V2 possui presets `FAST/BALANCED/HIGH/MAX`, intenção visual, edição/variações/inpainting quando Forge suporta e histórico por proveniência. Video V2 possui storyboard e projeto estruturado, mas geração e compreensão temporal continuam indisponíveis sem provider local real.
 
-O **Living Eye 3.0** conecta a presença visual a uma conversa contínua: reconhecimento parcial, endpoint por silêncio, envio automático da fala final, TTS iniciado por frases durante o streaming e barge-in que interrompe a voz e devolve a escuta. Mensagens faladas entram no mesmo chat persistente. A saída usa Piper neural local via HTTP, toca o WAV pelo Web Audio e calcula RMS real com `AnalyserNode`, fazendo o olho pulsar com o sinal de áudio. Se o provider estiver indisponível, Web Speech continua como fallback explícito e usa somente eventos de `boundary`. A personalidade casual ganhou regras anti-template, e o workspace pessoal passou a interpretar o estado em linguagem natural. Artefatos HTML/SVG abrem em preview isolado com fonte, cópia e download.
+O **Living Eye 3.0** conecta a presença visual a uma conversa contínua: captura por `MediaRecorder`, VAD local por energia, envio automático ao Faster Whisper, TTS iniciado por frases durante o streaming e barge-in que interrompe a voz e devolve a escuta. Mensagens faladas entram no mesmo chat persistente. A saída usa Piper neural local via HTTP, toca o WAV pelo Web Audio e calcula RMS real com `AnalyserNode`, fazendo o olho pulsar com o sinal de áudio. Se um provider estiver indisponível, Web Speech continua como fallback explícito. A personalidade casual ganhou regras anti-template, e o workspace pessoal passou a interpretar o estado em linguagem natural. Artefatos HTML/SVG abrem em preview isolado com fonte, cópia e download.
 
 O V6 não salva toda conversa indiscriminadamente. O Memory Gate V2 avalia utilidade, novidade, estabilidade, confiança, escopo, sensibilidade e duplicação. “Lembre que…” cria memória explícita; “esqueça…” exclui a correspondência encontrada. A central **Memória do Nexo** permite pesquisar, editar, confirmar, arquivar e apagar registros. Contradições preservam as duas evidências ou marcam a anterior como `SUPERSEDED`; nunca são sobrescritas silenciosamente. RAG usa hash de conteúdo e chunks guiados por estrutura para não reindexar arquivos inalterados.
 
@@ -58,7 +58,7 @@ Veja a arquitetura-base em [`docs/NEXO-CORE.md`](docs/NEXO-CORE.md) e os relató
 |---|---|
 | Stable | Core único, SQLite, INSTANT, filesystem protegido, capability registry, chat local |
 | Functional | FAST/DEEP, agent loop/DAG, browser, RAG, memória híbrida, visão condicionada ao modelo, skills/MCP sem servidor conectado |
-| Partial | sandbox sem isolamento de SO, debugging avançado, multi-agent, knowledge graph, acessibilidade auditada parcialmente, STT ainda dependente do navegador |
+| Partial | sandbox sem isolamento de SO, debugging avançado, multi-agent, knowledge graph, acessibilidade auditada parcialmente, voz local por turnos (ainda não full duplex) |
 | Funcional local | imagem SD 1.5 por WebUI AMD/DirectML, visão Qwen separada |
 | Scaffold/unavailable | vídeo desativado; edição depende do suporte do checkpoint/provider |
 
@@ -75,6 +75,7 @@ A matriz completa, evidências e limitações ficam em [`docs/master-audit/CAPAB
 ```powershell
 ollama pull qwen2.5-coder:3b
 ollama pull qwen2.5-coder:7b-instruct-q3_K_S
+ollama pull qwen2.5:3b-instruct
 ollama pull embeddinggemma
 ollama pull qwen2.5vl:3b
 ```
@@ -86,14 +87,15 @@ A forma mais simples é abrir `start-nexo.cmd`. Também é possível iniciar man
 ```powershell
 npm install
 npm run tts:setup # somente na primeira vez
-npm run tts:start
+npm run stt:setup # somente na primeira vez
+npm run voice:start
 ./scripts/tts/start-agent-with-voice.ps1
 npm run dev
 ```
 
 Depois, acesse [http://localhost:3000](http://localhost:3000).
 
-O serviço neural usa `pt_BR-faber-medium`, roda em CPU e escuta somente em `127.0.0.1:7332`. O áudio não sai do computador e não consome tokens pagos. `start-nexo.cmd` inicia o Piper e injeta `NEXO_TTS_PROVIDER_URL` automaticamente; se o Piper não estiver instalado, execute `npm run tts:setup` uma vez.
+O TTS usa `pt_BR-faber-medium` em `127.0.0.1:7332`; o STT usa Faster Whisper `small` com quantização INT8 em `127.0.0.1:7333`. Ambos rodam em CPU, o áudio não sai do computador e não consome tokens pagos. `start-nexo.cmd` inicia os dois providers e injeta as URLs no Core; execute `npm run tts:setup` e `npm run stt:setup` uma vez antes do primeiro uso.
 
 Validação do runtime:
 

@@ -90,7 +90,8 @@ export function evaluateConversationResponse(content, { context = 'casual', stat
     forgottenAliasFabricated: /\b(?:esquece|esqueça|não use mais|remove|tira)\b/iu.test(question) && /\b(?:vou me chamar|meu apelido (?:é|e)|eco)\b/iu.test(text),
     obviousCasualIntentDodged: /\b(?:o que|oq)\s+(?:podemos|dá para|da pra)\b/iu.test(question) && /\?\s*$/.test(text) && !/\b(?:projeto|criar|estudar|pesquisar|conversar|programar|ideia)\b/iu.test(text),
     unsupportedCasualDomain: !state.currentTopic && /\b(?:o que|oq)\s+(?:podemos|dá para|da pra)\b/iu.test(question) && /\b(?:marketing|empresa|clientes?|reunião|marca)\b/iu.test(text),
-    malformedAssembly: /\b(?:soumigo|souve|estouando|podeu|posso\s+posso|eu\s+eu)\b/i.test(text),
+    malformedAssembly: /\b(?:soumigo|souco|sougo|souve|estouando|podeu|voua|posso\s+posso|eu\s+eu)\b/i.test(text),
+    casualLanguageLeak: casual && /\b(?:names|assistant|user)\b/i.test(text),
   };
   const failures = Object.entries(flags).filter(([, failed]) => failed).map(([name]) => name);
   return { pass: failures.length === 0, failures, similarity: Number(similarity.toFixed(3)) };

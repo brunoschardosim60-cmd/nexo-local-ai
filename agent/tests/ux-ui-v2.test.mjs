@@ -150,3 +150,11 @@ test('Voice Presence supports partial speech, endpointing, streaming TTS and bar
   assert.match(livingEye, /voiceFrames >= 11/);
   assert.match(livingEye, /Conversa contínua/);
 });
+
+test('Voice Presence usa STT neural local com VAD e fallback do navegador', () => {
+  assert.match(voiceMode, /MediaRecorder/);
+  assert.match(voiceMode, /getFloatTimeDomainData/);
+  assert.match(voiceMode, /transcribeSpeech/);
+  assert.match(voiceMode, /localSttAvailable/);
+  assert.match(voiceMode, /startBrowserRecognition/);
+});

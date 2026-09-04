@@ -102,6 +102,7 @@ export default function Home() {
   const voice = useVoiceMode({
     agentOnline,
     agentToken,
+    localSttAvailable: Boolean((connection.health?.agent?.capabilities?.audio as { sttConfigured?: boolean } | undefined)?.sttConfigured),
     loading,
     mode,
     onPromptChange: setPrompt,

@@ -2,6 +2,7 @@ import { redactSecrets } from '../context/context-engine.mjs';
 import { compactHistory, routeIntent } from './intent-router.mjs';
 import { createStreamAssembler } from './stream-assembly.mjs';
 import { renderOperationalCapabilityAnswer } from '../conversation/operational-capabilities.mjs';
+import { renderGroundedConversationTurn } from '../conversation/grounded-turns.mjs';
 import {
   assessKnowledge,
   epistemicInstruction,
@@ -128,7 +129,11 @@ function socialPresenceFallback(prepared) {
         `${greeting}${name}! Cheguei com energia hoje 😄 Me conta o que tá passando pela tua cabeça.`,
         `${greeting} 😄 Bom te ver por aqui. Quer conversar, criar alguma coisa ou me contar uma ideia?`,
       ];
-  return variants[(Number(prepared.conversationState?.turnCount || 1) + greeting.length) % variants.length];
+  return variants[
+    repeated
+      ? Number(prepared.conversationState?.greetingCount || 1) % variants.length
+      : (Number(prepared.conversationState?.turnCount || 1) + greeting.length) % variants.length
+  ];
 }
 
 function guardedConversationFallback(prepared, quality, content) {
@@ -244,6 +249,30 @@ export function createNexoRuntime({
         content: renderOperationalCapabilityAnswer(conversationTurn.operationalCapabilities, question),
         model: 'Nexo SelfModel',
         capabilityState: conversationTurn.operationalCapabilities,
+        epistemic: assessKnowledge({ direct: true }),
+      };
+    }
+    const groundedConversation = conversationTurn
+      ? renderGroundedConversationTurn({
+          question,
+          state: conversationTurn.state,
+          update: conversationTurn.update,
+        })
+      : null;
+    if (groundedConversation) {
+      conversation?.completeTurn?.({
+        sessionId,
+        content: groundedConversation,
+        profile,
+        historyLength: Array.isArray(input.history) ? input.history.length : 0,
+      });
+      return {
+        kind: 'instant',
+        route: 'fast',
+        content: groundedConversation,
+        model: 'Nexo Grounded',
+        context: earlyDecision.context,
+        conversationState: conversationTurn.state,
         epistemic: assessKnowledge({ direct: true }),
       };
     }

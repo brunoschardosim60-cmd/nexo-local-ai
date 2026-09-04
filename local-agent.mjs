@@ -163,6 +163,17 @@ const server = createServer(async (request, response) => {
       audit('tts_synthesize', result.artifact.id, true, `${text.length} caracteres`);
       return send(response, 200, { ok: true, artifact: { id: result.artifact.id, type: result.artifact.type, mimeType: result.artifact.mimeType, provider: result.artifact.provider, metadata: result.artifact.metadata }, personality: result.personality, streaming: result.streaming });
     }
+    if (url.pathname === '/agent/audio/transcribe') {
+      const availability = await core.audio.availability();
+      if (!availability.stt?.available) return send(response, 503, { error: `STT neural local indisponível: ${availability.stt?.error || 'provider offline'}` });
+      const base64 = String(input.audio || input.base64 || '').trim();
+      const mimeType = String(input.mimeType || 'audio/webm').slice(0, 100);
+      if (!base64 || base64.length > 11_500_000) return send(response, 400, { error: 'O áudio deve ter entre 1 byte e 8 MB.' });
+      const controller = new AbortController(); request.once('aborted', () => controller.abort());
+      const result = await core.audio.transcribe({ base64, mimeType }, { signal: controller.signal, timestamps: true, languageDetection: true });
+      audit('stt_transcribe', result.provider || 'local-http-stt', true, `${result.text?.length || 0} caracteres`);
+      return send(response, 200, { ok: true, ...result });
+    }
     if (url.pathname === '/agent/image/edit') { const availability=await core.image.availability();if(!availability.available)return send(response,200,mediaUnavailable('image',availability));const job=core.mediaQueue.enqueue('image',{...input,mode:input.mode||'image-to-image'},{priority:input.priority||3});return send(response,202,{ok:true,job,content:'Edição adicionada à fila local.'}); }
     if (url.pathname === '/agent/video/storyboard') return send(response, 200, { ok: true, storyboard: core.video.storyboard(input) });
     if (url.pathname === '/agent/video/understand') return send(response, 200, { ok: true, result: await core.video.understand(input) });

@@ -7,8 +7,10 @@
 - `components/nexo/nexo-living-eye.tsx`: `NexoLivingEye`, `NexoLivingEyeMini`, modo de voz imersivo, state machine, Canvas 2D e analisador de áudio.
 - `app/globals.css`: pálpebras, profundidade, umidade, respiração, estados, responsividade e reduced motion.
 - `hooks/use-speech-output.ts`: reprodução neural, análise RMS real, fallback Web Speech e cancelamento/barge-in.
+- `hooks/use-voice-mode.ts`: captura `MediaRecorder`, VAD RMS, endpoint por silêncio e fallback controlado.
 - `scripts/tts/`: instalação e serviço HTTP local do Piper, usando `pt_BR-faber-medium`.
-- `local-agent.mjs`: endpoint autenticado que sintetiza e devolve um artifact de áudio local.
+- `scripts/stt/`: serviço local Faster Whisper `small` INT8 e scripts de instalação/execução.
+- `local-agent.mjs`: endpoints autenticados de síntese e transcrição.
 
 ## STATE MACHINE
 
@@ -26,12 +28,24 @@ Instalação e execução:
 
 ```powershell
 npm run tts:setup
-npm run tts:start
+npm run stt:setup
+npm run voice:start
 ./scripts/tts/start-agent-with-voice.ps1
 npm run dev
 ```
 
-`start-nexo.cmd` automatiza as três últimas etapas. O modelo e os WAVs gerados ficam em `.nexo-tts/`, ignorado pelo Git.
+`start-nexo.cmd` automatiza as três últimas etapas. Os modelos e arquivos locais ficam em `.nexo-tts/` e `.nexo-stt/`, ignorados pelo Git.
+
+## LOCAL NEURAL STT
+
+O microfone é capturado no navegador e o VAD mede energia localmente; após 850 ms de silêncio, o trecho é enviado ao endpoint autenticado do Core. O Core limita o payload e encaminha somente ao Faster Whisper em loopback. O modelo `small` roda em CPU com INT8 e retorna texto, idioma, confiança e segmentos. O fallback Web Speech é usado quando o serviço não está configurado ou falha durante a sessão.
+
+```powershell
+npm run stt:setup
+npm run voice:start
+```
+
+No teste ponta a ponta Piper → Faster Whisper, “Olá Bruno, o Nexo está ouvindo” foi recuperado integralmente em 3,204 s com o modelo já carregado. A primeira transcrição após carga levou 6,289 s. O teste separado passando pelo endpoint autenticado do Core levou 2,985 s em configuração `beam_size=1`; o preset final usa `beam_size=3` para priorizar precisão.
 
 ## BLINK SYSTEM
 
@@ -78,7 +92,7 @@ O navegador integrado disponível nesta execução não expõe gravação de ví
 
 ## LIMITATIONS
 
-- STT continua usando reconhecimento do navegador enquanto `NEXO_STT_PROVIDER_URL` não estiver configurado.
+- O STT local é por turnos/utterances; ainda não há transcrição incremental de áudio enquanto o usuário fala.
 - Piper é natural e leve, mas não oferece clonagem de voz nem a prosódia expressiva de um XTTS-v2; trocar de engine continua possível pelo mesmo contrato HTTP.
 - Web Speech continua como fallback quando o serviço neural estiver desligado; nessa situação, a reação volta a usar boundaries, não PCM real.
 - Os dois assets realistas somam aproximadamente 5,2 MB em PNG; é aceitável no uso local e ambos são cacheados, mas uma etapa futura pode gerar AVIF/WebP preservando a textura.

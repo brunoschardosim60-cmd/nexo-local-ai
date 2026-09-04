@@ -374,6 +374,8 @@ export function createNexoCore(overrides = {}) {
     provider: audioProvider,
     artifacts,
     enabled: Boolean(config.speechToTextUrl || config.textToSpeechUrl),
+    sttEnabled: Boolean(config.speechToTextUrl),
+    ttsEnabled: Boolean(config.textToSpeechUrl),
   });
   const video = createVideoRuntime({
     provider: videoProvider,

@@ -38,3 +38,27 @@ test('runtime persiste áudio e encaminha prosódia ao provider', async () => {
   assert.equal(synthesized.emphasis, 'expressive');
   assert.equal(result.artifact.provider, 'piper');
 });
+
+test('runtime separa disponibilidade de STT e TTS e preserva transcrição neural', async () => {
+  const runtime = createAudioRuntime({
+    enabled: true,
+    sttEnabled: true,
+    ttsEnabled: false,
+    provider: {
+      async transcribe(input, options) {
+        assert.equal(input.mimeType, 'audio/webm');
+        assert.equal(options.timestamps, true);
+        assert.equal(options.languageDetection, true);
+        return { text: 'Nexo está ouvindo.', language: 'pt', provider: 'faster-whisper-local' };
+      },
+      async health() { return { stt: { available: true }, tts: { available: false } }; },
+    },
+    artifacts: { async saveBuffer() { throw new Error('não deveria salvar áudio neste teste'); } },
+  });
+
+  const result = await runtime.transcribe({ base64: 'AA==', mimeType: 'audio/webm' });
+  assert.equal(result.text, 'Nexo está ouvindo.');
+  assert.equal(runtime.health().sttConfigured, true);
+  assert.equal(runtime.health().ttsConfigured, false);
+  await assert.rejects(() => runtime.synthesize({ text: 'não executar' }), /TTS de servidor não configurado/);
+});

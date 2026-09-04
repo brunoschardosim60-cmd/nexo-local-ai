@@ -61,3 +61,9 @@ Final live conversation benchmark:
 | `qwen2.5vl:3b` | 4/5 | 975 ms |
 
 All three models still failed the greeting-novelty live probe at least once. Deterministic conversation safeguards pass, but generative casualness remains limited by the installed local models and should continue to be measured rather than hidden by hardcoded replies.
+
+## Reavaliação em 2026-09-04
+
+No mesmo hardware, uma nova execução comparativa encontrou `4/5` para ambos os modelos, com mediana de `1.638 ms` para `qwen2.5:3b-instruct` e `4.753 ms` para `qwen2.5vl:3b`. O modelo puramente textual passou a ser o FAST padrão; `qwen2.5vl:3b` permanece dedicado à visão.
+
+Fatos sociais autoritativos (nome canônico, nome do usuário, apelido explícito, correções e referências diretas) agora são resolvidos pelo `ConversationState`, sem geração. No transcript live completo, a mediana de TTFT caiu de `2.361 ms` para `8 ms`, o P95 de `3.962 ms` para `17 ms`, e todas as propriedades continuaram em `PASS`. Isso também impede corrupções generativas como `souco` em respostas factuais, sem mascarar a qualidade do modelo em conversa aberta.

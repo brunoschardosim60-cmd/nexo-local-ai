@@ -102,6 +102,14 @@ export class NexoClient {
   async synthesizeSpeech(text: string, options: { voice?: string; pace?: number; energy?: string; pauses?: string; emphasis?: string } = {}, signal?: AbortSignal) {
     return jsonResponse<{ artifact: Pick<MediaArtifact, 'id' | 'type' | 'mimeType' | 'provider' | 'metadata'>; personality: Record<string, unknown>; streaming: boolean }>(await fetch(`${this.baseUrl}/agent/audio/synthesize`, { method: 'POST', headers: this.headers(true), body: JSON.stringify({ text, ...options }), signal }));
   }
+  async transcribeSpeech(audio: Blob, signal?: AbortSignal) {
+    const bytes = new Uint8Array(await audio.arrayBuffer());
+    let binary = '';
+    const stride = 0x8000;
+    for (let index = 0; index < bytes.length; index += stride)
+      binary += String.fromCharCode(...bytes.subarray(index, index + stride));
+    return jsonResponse<{ text: string; language?: string; confidence?: number; provider?: string; segments?: Array<{ start: number; end: number; text: string }> }>(await fetch(`${this.baseUrl}/agent/audio/transcribe`, { method: 'POST', headers: this.headers(true), body: JSON.stringify({ audio: btoa(binary), mimeType: audio.type || 'audio/webm' }), signal }));
+  }
   async mediaProviders() { return jsonResponse(await fetch(`${this.baseUrl}/agent/multimodal/providers`, { headers: this.headers() })); }
   async clearPersonal(target: 'goals' | 'activity' | 'learning') { return jsonResponse(await fetch(`${this.baseUrl}/agent/personal/clear`, { method: 'POST', headers: this.headers(true), body: JSON.stringify({ target, confirmation: 'CLEAR' }) })); }
   async warmRuntime(effort: Effort) { return jsonResponse(await fetch(`${this.baseUrl}/agent/runtime/warm`, { method: 'POST', headers: this.headers(true), body: JSON.stringify({ effort }) })); }

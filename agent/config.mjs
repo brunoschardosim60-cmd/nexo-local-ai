@@ -7,7 +7,7 @@ export function createAgentConfig(overrides = {}) {
     workspace: resolve(overrides.workspace || process.env.NEXO_WORKSPACE || '..'),
     dataDir: resolve(overrides.dataDir || process.env.NEXO_DATA_DIR || projectRoot, 'data'),
     ollamaUrl: overrides.ollamaUrl || process.env.NEXO_OLLAMA_URL || 'http://127.0.0.1:11434',
-    fastModel: overrides.fastModel || process.env.NEXO_FAST_MODEL || 'qwen2.5vl:3b',
+    fastModel: overrides.fastModel || process.env.NEXO_FAST_MODEL || 'qwen2.5:3b-instruct',
     capableModel: overrides.capableModel || process.env.NEXO_CAPABLE_MODEL || 'qwen2.5-coder:3b',
     coderModel: overrides.coderModel || process.env.NEXO_CODER_MODEL || overrides.capableModel || process.env.NEXO_CAPABLE_MODEL || 'qwen2.5-coder:3b',
     reasoningModel: overrides.reasoningModel || process.env.NEXO_REASONING_MODEL || overrides.capableModel || process.env.NEXO_CAPABLE_MODEL || 'qwen2.5-coder:3b',
