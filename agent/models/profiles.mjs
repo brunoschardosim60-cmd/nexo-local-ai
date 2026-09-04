@@ -7,7 +7,7 @@ function capabilitiesFor(name) {
 
 export function createModelProfiles({ config, database, fetchImpl = globalThis.fetch }) {
   const profiles = new Map(); let loaded = [];
-  for (const model of new Set([config.fastModel, config.capableModel, config.coderModel, config.reasoningModel, config.visionModel, config.embeddingModel].filter(Boolean))) {
+  for (const model of new Set([config.fastModel, config.capableModel, config.coderModel, config.reasoningModel, config.expertModel, config.visionModel, config.embeddingModel].filter(Boolean))) {
     profiles.set(model, { provider: 'ollama-local', model, contextWindow: null, installed: null, sizeBytes: null, loaded: false, capabilities: capabilitiesFor(model), performance: { ttftMs: null, tokensPerSecond: null, ramMB: null, vramMB: null }, quality: {} });
   }
   function hydrateQuality(profile) {

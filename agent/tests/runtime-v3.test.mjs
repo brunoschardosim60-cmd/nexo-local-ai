@@ -66,7 +66,7 @@ test('Personality Engine padrão é extrovertido, curioso e útil sem virar aten
 test('Runtime carrega contexto progressivamente e usa o modelo capaz em DEEP', async () => {
   const calls = { memory: 0, rag: 0, research: 0 };
   const runtime = createNexoRuntime({
-    config: { fastModel: 'fast:3b', capableModel: 'capable:7b' },
+    config: { fastModel: 'fast:3b', capableModel: 'capable:3b', expertModel: 'expert:7b' },
     memory: { search() { calls.memory += 1; return [{ content: 'Projeto medicina' }]; }, remember() {} },
     rag: { search() { calls.rag += 1; return []; } },
     router: {}, ollama: { warm: async model => ({ model, ready: true }) },
@@ -80,5 +80,7 @@ test('Runtime carrega contexto progressivamente e usa o modelo capaz em DEEP', a
   assert.equal(memoryAnswer.route, 'fast'); assert.equal(memoryAnswer.model, 'fast:3b'); assert.equal(calls.memory, 1); assert.equal(calls.rag, 0);
   assert.equal(memoryAnswer.contextStats.contextChars > 0, true);
   const deep = await runtime.prepare({ question: 'compare duas arquiteturas para uma API', history: [], effort: 'Alto' });
-  assert.equal(deep.route, 'deep'); assert.equal(deep.model, 'capable:7b');
+  assert.equal(deep.route, 'deep'); assert.equal(deep.model, 'capable:3b'); assert.equal(deep.options.numPredict, 650);
+  const expert = await runtime.prepare({ question: 'compare duas arquiteturas para uma API', history: [], effort: 'Extra alto' });
+  assert.equal(expert.model, 'expert:7b'); assert.equal(expert.options.numPredict, 900);
 });

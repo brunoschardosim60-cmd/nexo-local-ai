@@ -11,7 +11,7 @@ import { createModelRouter } from '../models/router.mjs';
 import { recordModelOutcome } from '../models/benchmark-learning.mjs';
 import { createCritic } from '../orchestrator/critic.mjs';
 
-const config = { fastModel: 'small', capableModel: 'large', coderModel: 'coder', reasoningModel: 'reasoner', visionModel: 'vision', embeddingModel: 'embeddinggemma' };
+const config = { fastModel: 'small', capableModel: 'large', coderModel: 'coder', reasoningModel: 'reasoner', expertModel: 'expert', visionModel: 'vision', embeddingModel: 'embeddinggemma' };
 
 test('Model Router V2 classifica domínio, dificuldade e ferramentas', () => {
   const router = createModelRouter(config);
@@ -22,6 +22,8 @@ test('Model Router V2 classifica domínio, dificuldade e ferramentas', () => {
   assert.equal(coding.model, 'coder');
   assert.equal(router.route({ objective: 'oi', purpose: 'response' }).model, 'small');
   assert.equal(router.route({ objective: 'Faça OCR desta imagem', purpose: 'vision' }).model, 'vision');
+  assert.equal(router.route({ objective: 'A tentativa falhou; replaneje com outra estratégia.', purpose: 'replanning' }).model, 'expert');
+  assert.equal(router.capabilities().models.expert, 'expert');
 });
 
 test('Model Router V2 usa benchmark local com amostra suficiente', () => {

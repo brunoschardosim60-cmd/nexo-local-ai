@@ -643,8 +643,10 @@ export function createNexoRuntime({
     const adaptiveRoute = router?.routeConfirmed
       ? await router.routeConfirmed(routingInput)
       : router?.route?.(routingInput);
-    const selectedModel = ['Alto', 'Extra alto'].includes(effort) || conversationTurn?.requiresEscalation
-      ? config.capableModel
+    const selectedModel = effort === 'Extra alto' || conversationTurn?.requiresEscalation
+      ? config.expertModel || config.capableModel
+      : effort === 'Alto'
+        ? config.capableModel
       : adaptiveRoute?.model ||
         (decision.route === 'fast' ? config.fastModel : config.capableModel);
     const predict =
@@ -653,10 +655,12 @@ export function createNexoRuntime({
           ? ['casual', 'playful'].includes(decision.context) ? 90 : 180
           : 360
         : effort === 'Extra alto'
-          ? 1_500
+          ? 900
           : effort === 'Alto'
-            ? 1_000
-            : 700;
+            ? 650
+            : complexity === 'high'
+              ? 550
+              : 420;
     const messages = [
       { role: 'system', content: `${coreSystem}\n${personalPrompt}` },
       ...history,

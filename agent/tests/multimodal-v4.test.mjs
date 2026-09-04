@@ -30,8 +30,8 @@ test('provider de visão envia imagem ao Ollama sem chamar nuvem', async () => {
 });
 
 test('geração de imagem persiste artefato e registra verificação', async () => {
-  const saved = []; const runtime = createImageRuntime({ enabled: true, provider: { generate: async plan => ({ base64: 'AA==', mimeType: 'image/png', provider: 'fake-local', metadata: plan }), probe: async () => ({ available: true }), health: () => ({ provider: 'fake-local' }) }, artifacts: { saveBase64: async input => { saved.push(input); return { id: 'artifact-1', location: 'image.png', ...input }; } }, vision: { evaluateGeneration: async () => ({ result: { verdict: 'PASS' } }) } });
-  const result = await runtime.generate({ prompt: 'uma floresta', aspectRatio: '16:9' }); assert.equal(result.artifact.id, 'artifact-1'); assert.equal(saved[0].provider, 'fake-local'); assert.equal(result.verification.result.verdict, 'PASS');
+  const saved = []; let releases = 0; const runtime = createImageRuntime({ enabled: true, provider: { generate: async plan => ({ base64: 'AA==', mimeType: 'image/png', provider: 'fake-local', metadata: plan }), probe: async () => ({ available: true }), release: async () => { releases += 1; }, health: () => ({ provider: 'fake-local' }) }, artifacts: { saveBase64: async input => { saved.push(input); return { id: 'artifact-1', location: 'image.png', ...input }; } }, vision: { evaluateGeneration: async () => ({ result: { verdict: 'PASS' } }) } });
+  const result = await runtime.generate({ prompt: 'uma floresta', aspectRatio: '16:9' }); assert.equal(result.artifact.id, 'artifact-1'); assert.equal(saved[0].provider, 'fake-local'); assert.equal(result.verification.result.verdict, 'PASS'); assert.equal(releases, 1);
 });
 
 test('fila de mídia persiste, executa e pode cancelar', async () => {

@@ -9,6 +9,7 @@ const DOMAIN_PATTERNS = Object.freeze({
 
 const TOOL_PATTERN = /\b(crie|corrija|edite|altere|execute|rode|abra|acesse|publique|instale|mova|remova|pesquise)\b[\s\S]*\b(arquivo|projeto|site|api|teste|terminal|navegador|internet|git|servidor)\w*\b/i;
 const MULTISTEP_PATTERN = /\b(e depois|em seguida|primeiro|por fim|todos?|inteiro|completo|multipl|planeje|implemente e|analise e)\b/i;
+const RECOVERY_PATTERN = /\b(repet|tente|tentativa|recuper|replanej|outra estrategia|outra hipotese|checkpoint|repli|critic)\w*\b/i;
 
 function normalize(value) {
   return String(value || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
@@ -52,14 +53,16 @@ export function createModelRouter(config, database = null, estimator = null, pro
       complexity: intelligence, privacy: intelligence?.privacy || 'normal', confidenceRequired: intelligence?.confidenceRequired || 'normal', computeBudget: intelligence?.computeBudget || 'medium',
       needsVision: domain === 'vision' || Boolean(intelligence?.needs.vision), needsResearch: domain === 'research' || Boolean(intelligence?.needs.research), media: intelligence?.needs.media || null,
       needsLongContext: text.length > 600 || MULTISTEP_PATTERN.test(text),
+      needsExpert: RECOVERY_PATTERN.test(text) || ['replanning', 'critic'].includes(purpose),
       reasons: [domain !== 'chat' ? `dominio:${domain}` : 'dominio:conversa', `dificuldade:${difficulty.level}`, needsTools ? 'ferramentas' : null].filter(Boolean),
     };
   }
 
   function candidates(analysis) {
     if (analysis.needsVision && config.visionModel) return [{ model: config.visionModel, role: 'vision' }];
-    if (analysis.domain === 'coding') return [{ model: config.coderModel, role: 'coder' }, { model: config.fastModel, role: 'fast' }];
-    if (analysis.domain === 'reasoning' || analysis.difficulty.level === 'high') return [{ model: config.reasoningModel, role: 'reasoning' }, { model: config.capableModel, role: 'capable' }];
+    if (analysis.needsExpert && config.expertModel) return [{ model: config.expertModel, role: 'expert' }, { model: config.capableModel, role: 'capable' }];
+    if (analysis.domain === 'coding') return [{ model: config.coderModel, role: 'coder' }, { model: config.expertModel, role: 'expert' }, { model: config.fastModel, role: 'fast' }];
+    if (analysis.domain === 'reasoning' || analysis.difficulty.level === 'high') return [{ model: config.reasoningModel, role: 'reasoning' }, { model: config.expertModel, role: 'expert' }, { model: config.capableModel, role: 'capable' }];
     return [{ model: config.fastModel, role: 'fast' }, { model: config.capableModel, role: 'capable' }];
   }
 
@@ -121,7 +124,7 @@ export function createModelRouter(config, database = null, estimator = null, pro
     capabilities() {
       return {
         version: '2.2.0', adaptive: true, benchmarkDriven: true, profileAware: Boolean(profiles), resourceAware: Boolean(resources), complexityEstimator: Boolean(estimator),
-        models: { fast: config.fastModel, coder: config.coderModel, reasoning: config.reasoningModel, vision: config.visionModel, embedding: config.embeddingModel },
+        models: { fast: config.fastModel, capable: config.capableModel, coder: config.coderModel, reasoning: config.reasoningModel, expert: config.expertModel, vision: config.visionModel, embedding: config.embeddingModel },
         domains: ['chat', 'coding', 'reasoning', 'research', 'documents', 'data', 'vision'],
         benchmarks: database?.listModelBenchmarks?.() || [],
       };
