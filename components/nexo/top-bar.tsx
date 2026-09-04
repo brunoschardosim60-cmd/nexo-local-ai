@@ -43,7 +43,9 @@ export function TopBar(props: TopBarProps) {
           <Menu />
         </Button>
         <div className="min-w-0">
-          <p className="truncate text-sm font-medium">{props.title}</p>
+          <p className="nexo-display truncate text-sm font-medium tracking-[-.02em]">
+            {props.title}
+          </p>
         </div>
       </div>
       <div className="flex items-center gap-1.5">

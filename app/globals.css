@@ -32,8 +32,11 @@
   --color-sidebar-border: var(--sidebar-border);
   --color-sidebar-ring: var(--sidebar-ring);
   --font-sans:
-    Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont,
-    'Segoe UI', sans-serif;
+    'Aptos', 'Segoe UI Variable Text', Inter, ui-sans-serif, system-ui,
+    sans-serif;
+  --font-display:
+    'Bahnschrift', 'Aptos Display', 'Segoe UI Variable Display', ui-sans-serif,
+    system-ui, sans-serif;
   --font-mono: 'Cascadia Code', 'SFMono-Regular', Consolas, monospace;
   --radius-sm: calc(var(--radius) * 0.65);
   --radius-md: calc(var(--radius) * 0.82);
@@ -43,25 +46,25 @@
 
 :root {
   color-scheme: light;
-  --background: oklch(0.985 0.008 285);
-  --foreground: oklch(0.2 0.025 275);
-  --card: oklch(1 0 0);
+  --background: oklch(0.978 0.01 225);
+  --foreground: oklch(0.18 0.03 235);
+  --card: oklch(0.995 0.006 220);
   --card-foreground: var(--foreground);
-  --popover: oklch(1 0 0);
+  --popover: oklch(0.995 0.006 220);
   --popover-foreground: var(--foreground);
-  --primary: oklch(0.58 0.205 285);
-  --primary-foreground: oklch(0.99 0.005 285);
-  --secondary: oklch(0.945 0.025 285);
-  --secondary-foreground: oklch(0.28 0.04 275);
-  --muted: oklch(0.955 0.016 285);
-  --muted-foreground: oklch(0.5 0.03 275);
-  --accent: oklch(0.93 0.035 285);
+  --primary: oklch(0.56 0.145 218);
+  --primary-foreground: oklch(0.99 0.006 215);
+  --secondary: oklch(0.935 0.025 220);
+  --secondary-foreground: oklch(0.26 0.04 232);
+  --muted: oklch(0.95 0.014 225);
+  --muted-foreground: oklch(0.48 0.032 232);
+  --accent: oklch(0.92 0.035 218);
   --accent-foreground: var(--foreground);
-  --border: oklch(0.87 0.018 285);
-  --input: oklch(0.84 0.025 285);
+  --border: oklch(0.86 0.024 225);
+  --input: oklch(0.82 0.035 222);
   --ring: var(--primary);
   --destructive: oklch(0.59 0.21 25);
-  --sidebar: oklch(0.972 0.012 285);
+  --sidebar: oklch(0.954 0.022 228);
   --sidebar-foreground: var(--foreground);
   --sidebar-primary: var(--primary);
   --sidebar-primary-foreground: var(--primary-foreground);
@@ -69,28 +72,28 @@
   --sidebar-accent-foreground: var(--foreground);
   --sidebar-border: var(--border);
   --sidebar-ring: var(--ring);
-  --radius: 0.82rem;
-  --glow: oklch(0.58 0.2 285 / 20%);
-  --body-glow: oklch(0.68 0.15 285 / 10%);
-  --composer-start: oklch(1 0 0);
-  --composer-end: oklch(0.97 0.012 285);
-  --surface: oklch(0.975 0.009 285);
-  --surface-raised: oklch(1 0 0);
-  --surface-floating: oklch(0.995 0.004 285);
-  --border-strong: oklch(0.76 0.025 285);
-  --text-secondary: oklch(0.4 0.03 275);
-  --text-muted: oklch(0.56 0.025 275);
-  --accent-hover: oklch(0.52 0.21 285);
-  --accent-subtle: oklch(0.94 0.035 285);
+  --radius: 1.08rem;
+  --glow: oklch(0.62 0.17 210 / 24%);
+  --body-glow: oklch(0.7 0.13 215 / 13%);
+  --composer-start: oklch(0.995 0.007 220);
+  --composer-end: oklch(0.955 0.023 225);
+  --surface: oklch(0.966 0.014 225);
+  --surface-raised: oklch(0.992 0.008 220);
+  --surface-floating: oklch(0.985 0.01 220);
+  --border-strong: oklch(0.72 0.045 222);
+  --text-secondary: oklch(0.38 0.035 232);
+  --text-muted: oklch(0.54 0.03 230);
+  --accent-hover: oklch(0.5 0.15 218);
+  --accent-subtle: oklch(0.925 0.04 218);
   --success: oklch(0.62 0.17 155);
   --warning: oklch(0.72 0.16 75);
   --danger: oklch(0.61 0.21 25);
-  --info: oklch(0.62 0.14 240);
+  --info: oklch(0.62 0.14 218);
   --status-success: var(--success);
   --status-warning: var(--warning);
   --status-danger: var(--danger);
   --status-info: var(--info);
-  --shadow-panel: 0 18px 60px oklch(0.2 0.04 275 / 10%);
+  --shadow-panel: 0 22px 70px oklch(0.16 0.055 235 / 12%);
   --motion-fast: 120ms;
   --motion-normal: 200ms;
   --motion-slow: 360ms;
@@ -98,49 +101,49 @@
 
 .dark {
   color-scheme: dark;
-  --background: oklch(0.115 0.018 275);
-  --foreground: oklch(0.96 0.012 275);
-  --card: oklch(0.165 0.023 275);
+  --background: oklch(0.085 0.024 238);
+  --foreground: oklch(0.95 0.015 220);
+  --card: oklch(0.135 0.028 235);
   --card-foreground: var(--foreground);
-  --popover: oklch(0.175 0.025 275);
+  --popover: oklch(0.145 0.03 234);
   --popover-foreground: var(--foreground);
-  --primary: oklch(0.74 0.16 285);
-  --primary-foreground: oklch(0.14 0.025 275);
-  --secondary: oklch(0.215 0.033 275);
+  --primary: oklch(0.77 0.14 210);
+  --primary-foreground: oklch(0.09 0.03 238);
+  --secondary: oklch(0.19 0.04 230);
   --secondary-foreground: var(--foreground);
-  --muted: oklch(0.2 0.025 275);
-  --muted-foreground: oklch(0.68 0.03 275);
-  --accent: oklch(0.23 0.04 275);
+  --muted: oklch(0.175 0.03 234);
+  --muted-foreground: oklch(0.68 0.035 220);
+  --accent: oklch(0.2 0.045 226);
   --accent-foreground: var(--foreground);
   --border: oklch(1 0 0 / 9%);
   --input: oklch(1 0 0 / 12%);
   --ring: var(--primary);
   --destructive: oklch(0.66 0.19 25);
-  --sidebar: oklch(0.092 0.016 275);
+  --sidebar: oklch(0.068 0.025 240);
   --sidebar-foreground: var(--foreground);
   --sidebar-primary: var(--primary);
   --sidebar-primary-foreground: var(--primary-foreground);
-  --sidebar-accent: oklch(0.2 0.026 275);
+  --sidebar-accent: oklch(0.17 0.04 228);
   --sidebar-accent-foreground: var(--foreground);
   --sidebar-border: var(--border);
   --sidebar-ring: var(--ring);
-  --glow: oklch(0.65 0.2 285 / 22%);
-  --body-glow: oklch(0.34 0.13 285 / 9%);
-  --composer-start: oklch(0.185 0.03 275);
-  --composer-end: oklch(0.145 0.021 275);
-  --surface: oklch(0.135 0.019 275);
-  --surface-raised: oklch(0.165 0.023 275);
-  --surface-floating: oklch(0.19 0.027 275);
+  --glow: oklch(0.7 0.16 205 / 28%);
+  --body-glow: oklch(0.43 0.13 215 / 16%);
+  --composer-start: oklch(0.155 0.035 232);
+  --composer-end: oklch(0.11 0.027 240);
+  --surface: oklch(0.105 0.026 238);
+  --surface-raised: oklch(0.14 0.03 234);
+  --surface-floating: oklch(0.165 0.035 230);
   --border-strong: oklch(1 0 0 / 16%);
-  --text-secondary: oklch(0.78 0.025 275);
-  --text-muted: oklch(0.62 0.025 275);
-  --accent-hover: oklch(0.79 0.16 285);
-  --accent-subtle: oklch(0.22 0.045 280);
+  --text-secondary: oklch(0.8 0.03 220);
+  --text-muted: oklch(0.63 0.03 222);
+  --accent-hover: oklch(0.82 0.14 208);
+  --accent-subtle: oklch(0.19 0.055 224);
   --success: oklch(0.72 0.16 155);
   --warning: oklch(0.78 0.15 75);
   --danger: oklch(0.7 0.19 25);
-  --info: oklch(0.72 0.13 240);
-  --shadow-panel: 0 24px 80px oklch(0.03 0.02 275 / 38%);
+  --info: oklch(0.76 0.13 210);
+  --shadow-panel: 0 28px 90px oklch(0.025 0.035 242 / 48%);
 }
 
 @layer base {
@@ -157,18 +160,15 @@
   }
   body {
     @apply bg-background text-foreground antialiased;
-    background-image: radial-gradient(
-      circle at 54% -10%,
-      var(--body-glow),
-      transparent 38%
-    );
+    background-image:
+      radial-gradient(circle at 58% -12%, var(--body-glow), transparent 38%),
+      radial-gradient(
+        circle at 92% 104%,
+        oklch(0.58 0.1 210 / 6%),
+        transparent 34%
+      );
     font-family:
-      Inter,
-      ui-sans-serif,
-      system-ui,
-      -apple-system,
-      BlinkMacSystemFont,
-      'Segoe UI',
+      'Aptos', 'Segoe UI Variable Text', Inter, ui-sans-serif, system-ui,
       sans-serif;
     text-rendering: optimizeLegibility;
   }
@@ -176,8 +176,14 @@
     cursor: pointer;
   }
   ::selection {
-    background: oklch(0.74 0.16 285 / 35%);
+    background: oklch(0.74 0.14 210 / 38%);
   }
+}
+
+.nexo-display,
+.nexo-brand-type {
+  font-family: var(--font-display);
+  font-variation-settings: 'wdth' 92;
 }
 
 .composer {
@@ -191,7 +197,44 @@
     box-shadow 160ms ease;
 }
 .nexo-shell {
-  background: var(--background);
+  isolation: isolate;
+  background:
+    radial-gradient(
+      ellipse 62% 46% at 64% -8%,
+      var(--body-glow),
+      transparent 68%
+    ),
+    radial-gradient(
+      ellipse 38% 36% at 92% 88%,
+      oklch(0.58 0.12 208 / 7%),
+      transparent 72%
+    ),
+    linear-gradient(
+      145deg,
+      var(--background),
+      color-mix(in oklch, var(--background), var(--primary) 2%)
+    );
+}
+.nexo-shell::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  pointer-events: none;
+  opacity: 0.34;
+  background-image:
+    linear-gradient(
+      to right,
+      color-mix(in oklch, var(--primary), transparent 97%) 1px,
+      transparent 1px
+    ),
+    linear-gradient(
+      to bottom,
+      color-mix(in oklch, var(--primary), transparent 97%) 1px,
+      transparent 1px
+    );
+  background-size: 42px 42px;
+  mask-image: radial-gradient(circle at 68% 35%, black, transparent 72%);
 }
 
 .nexo-tabs-scroll {
@@ -202,27 +245,38 @@
   display: none;
 }
 .nexo-sidebar {
-  background: color-mix(in oklch, var(--sidebar), var(--background) 18%);
+  background: color-mix(in oklch, var(--sidebar), transparent 5%);
+  box-shadow: inset -1px 0 color-mix(in oklch, var(--primary), transparent 91%);
+  backdrop-filter: blur(20px);
 }
 .nexo-header {
-  background: color-mix(in oklch, var(--background), transparent 8%);
-  backdrop-filter: blur(14px);
+  background: color-mix(in oklch, var(--background), transparent 14%);
+  box-shadow: 0 1px color-mix(in oklch, var(--primary), transparent 94%);
+  backdrop-filter: blur(20px) saturate(1.2);
 }
 .nexo-conversation {
   width: min(100%, 52rem);
   margin-inline: auto;
 }
 .nexo-message-assistant {
+  position: relative;
   max-width: min(100%, 48rem);
+  border-left: 1px solid color-mix(in oklch, var(--primary), transparent 68%);
+  padding-left: 0.9rem !important;
 }
 .nexo-message-user {
   max-width: min(78%, 38rem);
-  background: var(--accent-subtle);
+  background: linear-gradient(
+    145deg,
+    var(--accent-subtle),
+    color-mix(in oklch, var(--accent-subtle), var(--card) 28%)
+  );
   color: var(--foreground);
-  border: 1px solid color-mix(in oklch, var(--primary), transparent 78%);
+  border: 1px solid color-mix(in oklch, var(--primary), transparent 68%);
+  box-shadow: 0 12px 38px color-mix(in oklch, var(--primary), transparent 91%);
 }
 .nexo-composer-wrap {
-  background: linear-gradient(to top, var(--background) 72%, transparent);
+  background: linear-gradient(to top, var(--background) 66%, transparent);
 }
 .composer {
   box-shadow:
@@ -247,14 +301,48 @@
   inset: 14%;
   display: grid;
   place-items: center;
-  border-radius: 38%;
+  overflow: hidden;
+  border: 1px solid oklch(0.8 0.13 205 / 52%);
+  border-radius: 54% 46% 51% 49% / 47% 53% 45% 55%;
   background:
-    radial-gradient(circle at 30% 18%, oklch(0.92 0.08 300), transparent 28%),
-    linear-gradient(145deg, oklch(0.72 0.17 292), oklch(0.47 0.2 273));
+    radial-gradient(
+      circle at 50% 52%,
+      oklch(0.07 0.025 240) 0 14%,
+      transparent 15%
+    ),
+    radial-gradient(
+      circle at 50% 52%,
+      oklch(0.72 0.16 205) 0 25%,
+      oklch(0.31 0.11 220) 47%,
+      transparent 68%
+    ),
+    radial-gradient(
+      circle at 30% 18%,
+      oklch(0.96 0.06 200 / 72%),
+      transparent 24%
+    ),
+    linear-gradient(145deg, oklch(0.42 0.12 217), oklch(0.16 0.055 238));
   box-shadow:
     inset 0 1px 0 oklch(1 0 0/0.35),
     0 14px 44px var(--glow);
-  transform: rotate(-4deg);
+  transform: rotate(-3deg);
+}
+.nexo-orb-core::after {
+  content: '';
+  position: absolute;
+  width: 18%;
+  height: 10%;
+  top: 26%;
+  left: 31%;
+  border-radius: 999px;
+  background: oklch(0.98 0.025 200 / 82%);
+  filter: blur(0.2px);
+}
+.nexo-orb-core svg {
+  position: relative;
+  z-index: 1;
+  opacity: 0.82;
+  filter: drop-shadow(0 1px 4px oklch(0.03 0.02 240 / 70%));
 }
 .nexo-orb i,
 .nexo-orb b {
@@ -282,11 +370,45 @@
   background: linear-gradient(145deg, var(--danger), oklch(0.42 0.18 25));
 }
 .artifact-sheet {
-  box-shadow: -24px 0 80px oklch(0.03 0.02 275/0.28);
+  box-shadow: -24px 0 80px oklch(0.03 0.025 238/0.34);
 }
 .message-actions {
-  opacity: 0.25;
+  opacity: 0.52;
   transition: opacity var(--motion-fast) ease;
+}
+.nexo-sidebar-section {
+  color: color-mix(in oklch, var(--muted-foreground), var(--primary) 18%);
+  font-family: var(--font-display);
+  letter-spacing: 0.13em;
+}
+.nexo-nav-group {
+  display: grid;
+  gap: 0.2rem;
+}
+.nexo-nav-item {
+  justify-content: flex-start;
+  border-radius: calc(var(--radius) * 0.72);
+}
+.nexo-nav-item-featured:hover {
+  background: color-mix(in oklch, var(--primary), transparent 90%);
+  color: var(--foreground);
+}
+.nexo-nav-item-system {
+  color: var(--muted-foreground);
+  font-size: 0.78rem;
+}
+.nexo-primary-action {
+  box-shadow:
+    0 10px 30px color-mix(in oklch, var(--primary), transparent 76%),
+    inset 0 1px color-mix(in oklch, white, transparent 72%);
+}
+.nexo-thinking-status {
+  width: fit-content;
+  border: 1px solid color-mix(in oklch, var(--primary), transparent 83%);
+  border-radius: 999px;
+  background: color-mix(in oklch, var(--surface-floating), transparent 18%);
+  padding: 0.42rem 0.72rem 0.42rem 0.5rem;
+  box-shadow: 0 12px 38px color-mix(in oklch, var(--primary), transparent 91%);
 }
 .nexo-message:hover .message-actions,
 .message-actions:focus-within {
@@ -1026,10 +1148,10 @@
   background:
     radial-gradient(
       circle at 28% 18%,
-      oklch(0.88 0.1 295 / 65%),
+      oklch(0.91 0.09 200 / 68%),
       transparent 32%
     ),
-    linear-gradient(145deg, oklch(0.68 0.19 292), oklch(0.52 0.22 276));
+    linear-gradient(145deg, oklch(0.67 0.16 207), oklch(0.39 0.13 226));
   box-shadow:
     inset 0 1px 0 oklch(1 0 0 / 28%),
     0 10px 30px var(--glow);
@@ -1045,7 +1167,7 @@
 }
 
 .assistant-message {
-  box-shadow: 0 12px 34px oklch(0.2 0.04 275 / 5%);
+  box-shadow: 0 12px 34px oklch(0.16 0.05 235 / 7%);
 }
 
 .nexo-rich-text {
@@ -1154,8 +1276,8 @@
   overflow: hidden;
   border: 1px solid var(--border);
   border-radius: 0.8rem;
-  background: oklch(0.13 0.02 275);
-  color: oklch(0.93 0.015 275);
+  background: oklch(0.115 0.025 238);
+  color: oklch(0.93 0.015 220);
 }
 
 .nexo-code > div {
@@ -1164,7 +1286,7 @@
   min-height: 2rem;
   border-bottom: 1px solid oklch(1 0 0 / 9%);
   padding: 0 0.75rem;
-  color: oklch(0.7 0.03 275);
+  color: oklch(0.7 0.035 218);
   font-family: var(--font-mono);
   font-size: 0.66rem;
   text-transform: uppercase;

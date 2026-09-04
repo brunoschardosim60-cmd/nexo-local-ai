@@ -68,7 +68,7 @@ export function MessageList(props: MessageListProps) {
               {greeting}
               {props.profileName ? `, ${props.profileName}` : ''}.
             </p>
-            <h1 className="mt-2 text-3xl font-semibold tracking-[-.05em] sm:text-[2.6rem]">
+            <h1 className="nexo-display mt-2 text-3xl font-semibold tracking-[-.055em] sm:text-[2.6rem]">
               O que vamos fazer?
             </h1>
             <p className="mx-auto mt-4 max-w-md text-sm leading-6 text-muted-foreground">
@@ -100,7 +100,7 @@ export function MessageList(props: MessageListProps) {
             ))}
             {props.loading &&
               props.history[props.history.length - 1]?.role !== 'assistant' && (
-                <div className="flex items-center gap-3 text-sm text-muted-foreground">
+                <div className="nexo-thinking-status flex items-center gap-2.5 text-sm text-muted-foreground">
                   <NexoOrb state="thinking" className="size-7" />
                   <span>{props.activityLabel}</span>
                 </div>

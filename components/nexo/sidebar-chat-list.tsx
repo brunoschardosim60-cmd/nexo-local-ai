@@ -41,12 +41,14 @@ export function SidebarChatList(props: SidebarChatListProps) {
       <div className="flex items-center gap-3 px-2 py-2">
         <NexoOrb className="size-10" />
         <div>
-          <p className="font-semibold tracking-[-.03em]">{BRAND_NAME}</p>
+          <p className="nexo-brand-type font-semibold tracking-[-.04em]">
+            {BRAND_NAME}
+          </p>
           <p className="text-[11px] text-muted-foreground">Seu espaço local</p>
         </div>
       </div>
       <Button
-        className="mt-4 h-10 justify-start rounded-xl shadow-sm"
+        className="nexo-primary-action mt-4 h-10 justify-start rounded-[calc(var(--radius)*.78)]"
         onClick={props.onCreateChat}
       >
         <Plus /> Novo
@@ -62,7 +64,7 @@ export function SidebarChatList(props: SidebarChatListProps) {
         />
       </div>
       <div className="mt-5 flex min-h-0 flex-1 flex-col">
-        <p className="mb-2 px-2 text-[10px] font-semibold uppercase tracking-[.15em] text-muted-foreground">
+        <p className="nexo-sidebar-section mb-2 px-2 text-[10px] font-semibold uppercase">
           Conversas
         </p>
         <ScrollArea className="min-h-0 flex-1 pr-1">
@@ -75,7 +77,7 @@ export function SidebarChatList(props: SidebarChatListProps) {
             {props.visibleChats.map((chat) => (
               <div
                 key={chat.id}
-                className={`group flex items-center rounded-xl transition ${chat.id === props.activeChatId ? 'bg-accent text-accent-foreground' : 'text-muted-foreground hover:bg-accent/70 hover:text-accent-foreground'}`}
+                className={`group flex items-center rounded-[calc(var(--radius)*.72)] transition ${chat.id === props.activeChatId ? 'bg-primary/10 text-accent-foreground shadow-[inset_2px_0_0_var(--primary)]' : 'text-muted-foreground hover:bg-accent/70 hover:text-accent-foreground'}`}
               >
                 <button
                   className="min-w-0 flex-1 truncate px-3 py-2.5 text-left text-xs"
@@ -98,49 +100,59 @@ export function SidebarChatList(props: SidebarChatListProps) {
         </ScrollArea>
       </div>
       <div className="my-2 h-px bg-border" />
-      <Button
-        className="justify-start"
-        variant="ghost"
-        onClick={props.onOpenProjects}
-      >
-        <FolderPlus /> Projetos
-      </Button>
-      <Button
-        className="justify-start"
-        variant="ghost"
-        onClick={props.onOpenMemory}
-      >
-        <Library /> Memória
-      </Button>
-      <Button
-        className="justify-start"
-        variant="ghost"
-        onClick={props.onOpenProjects}
-      >
-        <LayoutDashboard /> Meu dia
-      </Button>
-      <Button
-        className="justify-start"
-        variant="ghost"
-        onClick={props.onOpenCapabilities}
-      >
-        <Blocks /> Capacidades
-      </Button>
-      <Button
-        className="justify-start"
-        variant="ghost"
-        onClick={props.onOpenCommands}
-      >
-        <Keyboard /> Comandos{' '}
-        <kbd className="ml-auto text-[9px] text-muted-foreground">Ctrl K</kbd>
-      </Button>
-      <Button
-        className="justify-start"
-        variant="ghost"
-        onClick={props.onOpenSettings}
-      >
-        <Settings2 /> Configurações
-      </Button>
+      <p className="nexo-sidebar-section mb-1.5 px-2 text-[10px] font-semibold uppercase">
+        Espaço
+      </p>
+      <div className="nexo-nav-group">
+        <Button
+          className="nexo-nav-item nexo-nav-item-featured"
+          variant="ghost"
+          onClick={props.onOpenProjects}
+        >
+          <FolderPlus /> Projetos
+        </Button>
+        <Button
+          className="nexo-nav-item nexo-nav-item-featured"
+          variant="ghost"
+          onClick={props.onOpenMemory}
+        >
+          <Library /> Memória
+        </Button>
+        <Button
+          className="nexo-nav-item nexo-nav-item-featured"
+          variant="ghost"
+          onClick={props.onOpenProjects}
+        >
+          <LayoutDashboard /> Meu dia
+        </Button>
+      </div>
+      <p className="nexo-sidebar-section mb-1 mt-3 px-2 text-[10px] font-semibold uppercase">
+        Sistema
+      </p>
+      <div className="nexo-nav-group">
+        <Button
+          className="nexo-nav-item nexo-nav-item-system"
+          variant="ghost"
+          onClick={props.onOpenCapabilities}
+        >
+          <Blocks /> Capacidades
+        </Button>
+        <Button
+          className="nexo-nav-item nexo-nav-item-system"
+          variant="ghost"
+          onClick={props.onOpenCommands}
+        >
+          <Keyboard /> Comandos{' '}
+          <kbd className="ml-auto text-[9px] text-muted-foreground">Ctrl K</kbd>
+        </Button>
+        <Button
+          className="nexo-nav-item nexo-nav-item-system"
+          variant="ghost"
+          onClick={props.onOpenSettings}
+        >
+          <Settings2 /> Configurações
+        </Button>
+      </div>
     </div>
   );
 }

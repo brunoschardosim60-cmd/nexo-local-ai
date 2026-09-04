@@ -46,6 +46,10 @@ const messageList = await readFile(
   new URL('../../components/nexo/message-list.tsx', import.meta.url),
   'utf8',
 );
+const sidebar = await readFile(
+  new URL('../../components/nexo/sidebar-chat-list.tsx', import.meta.url),
+  'utf8',
+);
 const chatSubmit = await readFile(
   new URL('../../lib/nexo/chat-submit.ts', import.meta.url),
   'utf8',
@@ -80,6 +84,19 @@ test('UX 2.0 has semantic design tokens and reduced-motion support', () => {
   }
   assert.match(styles, /prefers-reduced-motion:\s*reduce/);
   assert.match(styles, /\.nexo-orb/);
+});
+
+test('Nexo visual identity derives from the Living Eye instead of shadcn defaults', () => {
+  assert.match(styles, /--primary:\s*oklch\(0\.56 0\.145 218\)/);
+  assert.match(styles, /--primary:\s*oklch\(0\.77 0\.14 210\)/);
+  assert.match(styles, /--font-display:/);
+  assert.match(styles, /Bahnschrift/);
+  assert.match(styles, /--radius:\s*1\.08rem/);
+  assert.match(styles, /\.nexo-shell::before/);
+  assert.match(styles, /\.nexo-thinking-status/);
+  assert.doesNotMatch(styles, /0\.58 0\.205 285/);
+  assert.match(sidebar, />\s*Espaço\s*</);
+  assert.match(sidebar, />\s*Sistema\s*</);
 });
 
 test('Living Eye exposes its complete state machine and biological motion', () => {
