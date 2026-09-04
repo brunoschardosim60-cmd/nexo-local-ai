@@ -7,7 +7,14 @@
       "args": ["caminho/para/server.mjs"],
       "cwd": ".",
       "protocolVersion": "2025-06-18",
-      "env": {}
+      "env": {
+        "EXAMPLE_SECRET": {
+          "fromEnv": "NEXO_EXAMPLE_SECRET",
+          "required": true
+        }
+      },
+      "allowedTools": ["example_read"],
+      "permissions": {}
     }
   ]
 }

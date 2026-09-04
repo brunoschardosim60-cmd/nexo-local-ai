@@ -129,7 +129,9 @@ npm run benchmark:v5
 
 As skills versionadas ficam em `skills/*/SKILL.md`; skills pessoais podem ser adicionadas em `data/skills/` e não são enviadas ao Git. Cada skill tem `name`, `description` e instruções, pode ser ativada ou desativada e só entra no contexto quando combina com o objetivo.
 
-Para MCP, copie `mcp-servers.example.json` para `data/mcp-servers.json` e configure somente processos locais confiáveis. O Nexo inicia o servidor por stdio, negocia capacidades, lista tools e exige aprovação antes de conectar ou chamar uma tool MCP. Variáveis de ambiente não aparecem na API de status.
+Para MCP, copie `mcp-servers.example.json` para `data/mcp-servers.json` e configure somente processos locais confiáveis. O Nexo inicia o servidor por stdio, negocia capacidades, filtra tools por `allowedTools` e exige aprovação antes de conectar ou chamar uma tool MCP. Segredos podem ser referenciados com `{ "fromEnv": "NOME_DA_VARIAVEL" }` e nunca aparecem na API de status. Tools destrutivas MCP são bloqueadas; cada escrita restante precisa estar explicitamente liberada na configuração e ainda passa pela confirmação do Nexo.
+
+Calendar, Sheets, Drive e Gmail têm um instalador local auditável e fixado em revisão. Execute `npm run google:setup`, siga [docs/GOOGLE-WORKSPACE.md](docs/GOOGLE-WORKSPACE.md), configure seu OAuth com `npm run google:auth` e valide o processo MCP com `npm run google:check`.
 
 ## Privacidade
 

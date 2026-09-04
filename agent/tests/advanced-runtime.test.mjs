@@ -7,7 +7,7 @@ import { DatabaseSync } from 'node:sqlite';
 import { createBackgroundScheduler } from '../background/scheduler.mjs';
 import { createBrowserAgent, pngSize } from '../browser/browser-agent.mjs';
 import { createEventBus } from '../events/event-bus.mjs';
-import { createMcpManager } from '../mcp/client.mjs';
+import { classifyRisk, createMcpManager, resolveEnvironment } from '../mcp/client.mjs';
 import { createDatabase } from '../memory/database.mjs';
 import { createPlanner } from '../orchestrator/planner.mjs';
 import { assertSafeUrl, createResearchAgent, normalizeSearchQuery } from '../research/research-agent.mjs';
@@ -66,6 +66,16 @@ test('Planner trata criação de site como coding e exige verificação visual',
   assert.ok(plan.every(step => step.assignedAgent === 'coding'));
 });
 
+test('Planner reserva o fluxo Google Workspace ao MCP local', async () => {
+  const specialists = createSpecialistRegistry();
+  const planner = createPlanner({ ollama: { async json() { throw new Error('fallback'); } }, router: { route: () => ({ model: 'local', analysis: { difficulty: { level: 'low' } } }) }, specialists });
+  const plan = await planner.createPlan({ objective: 'crie um evento no meu Google Calendar', preferredSpecialist: 'workspace', tools: [{ name: 'mcp.servers' }, { name: 'mcp.tools' }, { name: 'mcp.call' }], context: {} });
+  assert.ok(plan.every(step => step.assignedAgent === 'workspace'));
+  assert.deepEqual(plan[0].action, { tool: 'mcp.servers', input: {} });
+  assert.deepEqual(plan[1].action, { tool: 'mcp.tools', input: { serverId: 'google-workspace' } });
+  assert.match(plan[2].description, /confirmação explícita/i);
+});
+
 test('Skills locais são descobertas, recuperadas e desativadas persistentemente', async () => {
   const directory = await mkdtemp(join(tmpdir(), 'nexo-skills-')); const root = join(directory, 'skills'); await mkdir(join(root, 'coding'), { recursive: true });
   await writeFile(join(root, 'coding', 'SKILL.md'), '---\nname: test-coding\ndescription: programação bugs testes\n---\n\nLeia antes de editar.\n', 'utf8');
@@ -110,9 +120,35 @@ test('cliente MCP stdio negocia, descobre e chama tools', async () => {
   finally { await mcp.close(); await rm(directory, { recursive: true, force: true }); }
 });
 
+test('MCP resolve segredos por ambiente, filtra tools e bloqueia destruição', async () => {
+  assert.deepEqual(resolveEnvironment({ CLIENT_ID: { fromEnv: 'TEST_CLIENT_ID' } }, { TEST_CLIENT_ID: 'local-id' }), { CLIENT_ID: 'local-id' });
+  assert.throws(() => resolveEnvironment({ CLIENT_SECRET: { fromEnv: 'MISSING_SECRET' } }, {}), /MISSING_SECRET/);
+  assert.equal(classifyRisk('gmail_list_labels'), 'read');
+  assert.equal(classifyRisk('gmail_modify_labels'), 'write');
+  assert.equal(classifyRisk('calendar_delete_event'), 'high');
+
+  const directory = await mkdtemp(join(tmpdir(), 'nexo-mcp-policy-')); const serverPath = join(directory, 'server.mjs'); const configPath = join(directory, 'mcp.json');
+  const source = `import readline from 'node:readline';\nconst lines=readline.createInterface({input:process.stdin});\nlines.on('line',line=>{const m=JSON.parse(line);if(m.method==='notifications/initialized')return;let result={};if(m.method==='initialize')result={protocolVersion:'2025-06-18',capabilities:{tools:{}},serverInfo:{name:'policy-test',version:'1'}};if(m.method==='tools/list')result={tools:['read_value','write_value','delete_value','hidden_value'].map(name=>({name,description:name,inputSchema:{type:'object'}}))};if(m.method==='tools/call')result={content:[{type:'text',text:process.env.TEST_SECRET||'missing'}],structuredContent:{tool:m.params.name}};process.stdout.write(JSON.stringify({jsonrpc:'2.0',id:m.id,result})+'\\n');});\n`;
+  await writeFile(serverPath, source, 'utf8');
+  await writeFile(configPath, JSON.stringify({ servers: [{ id: 'policy', command: process.execPath, args: [serverPath], cwd: '.', env: { TEST_SECRET: { fromEnv: 'NEXO_TEST_MCP_SECRET' } }, allowedTools: ['read_value', 'write_value', 'delete_value'], permissions: { write_value: 'allow', delete_value: 'allow' } }] }), 'utf8');
+  const previous = process.env.NEXO_TEST_MCP_SECRET; process.env.NEXO_TEST_MCP_SECRET = 'resolved-secret';
+  const mcp = createMcpManager({ workspace: directory, configPath });
+  try {
+    const listed = await mcp.listTools('policy'); assert.deepEqual(listed.tools.map(tool => tool.name), ['read_value', 'write_value', 'delete_value']);
+    assert.equal((await mcp.callTool({ serverId: 'policy', tool: 'read_value' })).content[0].text, 'resolved-secret');
+    assert.equal((await mcp.callTool({ serverId: 'policy', tool: 'write_value' })).risk, 'write');
+    await assert.rejects(() => mcp.callTool({ serverId: 'policy', tool: 'delete_value' }), /destrutiva MCP bloqueada/);
+    await assert.rejects(() => mcp.callTool({ serverId: 'policy', tool: 'hidden_value' }), /não autorizada/);
+  } finally {
+    if (previous == null) delete process.env.NEXO_TEST_MCP_SECRET; else process.env.NEXO_TEST_MCP_SECRET = previous;
+    await mcp.close(); await rm(directory, { recursive: true, force: true });
+  }
+});
+
 test('especialistas selecionam função sem conceder novas permissões', () => {
-  const specialists = createSpecialistRegistry(); assert.equal(specialists.suggest('pesquise artigos e fontes'), 'research'); assert.equal(specialists.suggest('corrija o bug e rode testes'), 'coding'); assert.equal(specialists.suggest('crie um website profissional'), 'coding'); assert.match(specialists.prompt('browser'), /permissões/);
+  const specialists = createSpecialistRegistry(); assert.equal(specialists.suggest('pesquise artigos e fontes'), 'research'); assert.equal(specialists.suggest('corrija o bug e rode testes'), 'coding'); assert.equal(specialists.suggest('crie um website profissional'), 'coding'); assert.equal(specialists.suggest('crie um evento no meu Google Calendar'), 'workspace'); assert.equal(specialists.suggest('leia meu último e-mail no Gmail'), 'workspace'); assert.equal(specialists.suggest('atualize a planilha no Google Sheets'), 'workspace'); assert.equal(specialists.suggest('encontre o arquivo no meu Drive'), 'workspace'); assert.deepEqual(specialists.allowedNamespaces('workspace'), ['mcp.']); assert.match(specialists.prompt('browser'), /permissões/);
   assert.equal(permissionPolicy({ name: 'filesystem.read', risk: 'read' }, { path: '.env.local' }).decision, 'deny');
+  assert.equal(permissionPolicy({ name: 'mcp.call', risk: 'execute' }, { serverId: 'google-workspace' }).decision, 'ask');
 });
 
 test('coordenador delega subtarefas com vínculo e especialista', () => {

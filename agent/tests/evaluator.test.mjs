@@ -49,3 +49,13 @@ test('uma promessa de correção sem alteração observada falha', async () => {
   assert.equal(result.validated, false);
   assert.ok(result.acceptanceCriteria.some(item => !item.met));
 });
+
+test('uma operação Google só passa com evidência real da tool MCP', async () => {
+  const evaluator = createEvaluator();
+  const task = { objective: 'Crie um evento no meu Google Calendar.', plan: [{ id: 'step-1', status: 'completed' }] };
+  const failed = await evaluator.summarize(task, [{ tool: 'mcp.tools', status: 'completed', output: { serverId: 'google-workspace', tools: [] } }]);
+  assert.equal(failed.verdict, 'FAIL');
+  const passed = await evaluator.summarize(task, [{ tool: 'mcp.call', status: 'completed', output: { serverId: 'google-workspace', tool: 'calendar_create_event', risk: 'write', content: [{ type: 'text', text: 'created' }] } }]);
+  assert.equal(passed.verdict, 'PASS');
+  assert.match(passed.evidence.join(' '), /calendar_create_event/);
+});

@@ -1,0 +1,47 @@
+diff --git a/src/auth/oauth.py b/src/auth/oauth.py
+index 5a5d89c..57d1eb2 100644
+--- a/src/auth/oauth.py
++++ b/src/auth/oauth.py
+@@ -8,19 +8,29 @@ from google.auth.transport.requests import Request
+ from google.oauth2.credentials import Credentials
+ from google_auth_oauthlib.flow import InstalledAppFlow
+ 
+-SCOPES = [
+-    "https://www.googleapis.com/auth/gmail.modify",
+-    "https://www.googleapis.com/auth/calendar",
+-    "https://www.googleapis.com/auth/drive",
+-    "https://www.googleapis.com/auth/documents",
++MINIMAL_SCOPES = (
++    "https://www.googleapis.com/auth/gmail.readonly",
++    "https://www.googleapis.com/auth/gmail.send",
++    "https://www.googleapis.com/auth/calendar.events",
++    "https://www.googleapis.com/auth/drive.file",
+     "https://www.googleapis.com/auth/spreadsheets",
+-    "https://www.googleapis.com/auth/presentations",
+-    "https://www.googleapis.com/auth/forms.body",
+-    "https://www.googleapis.com/auth/forms.responses.readonly",
+-    "https://www.googleapis.com/auth/tasks",
+-    "https://www.googleapis.com/auth/chat.spaces",
+-    "https://www.googleapis.com/auth/chat.messages",
+-    "https://www.googleapis.com/auth/meetings.space.created",
+-]
++)
++
++
++def _configured_scopes() -> list[str]:
++    """Allow disabling services without permitting broader OAuth scopes."""
++    raw = os.environ.get("GOOGLE_OAUTH_SCOPES", "").strip()
++    if not raw:
++        return list(MINIMAL_SCOPES)
++    requested = [scope.strip() for scope in raw.split(",") if scope.strip()]
++    unsupported = sorted(set(requested) - set(MINIMAL_SCOPES))
++    if unsupported:
++        raise RuntimeError(f"OAuth scopes outside the Nexo allowlist: {', '.join(unsupported)}")
++    if not requested:
++        raise RuntimeError("At least one Google OAuth scope is required")
++    return requested
++
++
++SCOPES = _configured_scopes()
+ 
+ TOKEN_PATH = Path(__file__).parent.parent.parent / ".credentials" / "token.json"

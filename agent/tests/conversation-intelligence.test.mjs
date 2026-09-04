@@ -31,9 +31,17 @@ test('SelfModel operacional diferencia disponível, condicional e indisponível'
   assert.equal(snapshot.capabilities.find((item) => item.id === 'coding').status, 'AVAILABLE');
   assert.equal(snapshot.capabilities.find((item) => item.id === 'image').status, 'CONDITIONAL');
   assert.equal(snapshot.capabilities.find((item) => item.id === 'voice').status, 'UNAVAILABLE');
+  assert.equal(snapshot.capabilities.find((item) => item.id === 'workspace').status, 'UNAVAILABLE');
   assert.equal(isCapabilityQuestion('oq tu sabe fazer?'), true);
   assert.match(renderOperationalCapabilityAnswer(snapshot, 'consegue gerar imagem?'), /depende de configuração|Forge/i);
   assert.match(renderOperationalCapabilityAnswer(snapshot, 'consegue falar por voz?'), /não consigo/i);
+});
+
+test('SelfModel declara Google Workspace como condicional quando MCP está configurado', () => {
+  const snapshot = createOperationalCapabilitySnapshot({ health: { mcp: { configured: 1 } } });
+  const workspace = snapshot.capabilities.find((item) => item.id === 'workspace');
+  assert.equal(workspace.status, 'CONDITIONAL');
+  assert.match(renderOperationalCapabilityAnswer(snapshot, 'consegue usar meu Gmail?'), /OAuth|confirmação/i);
 });
 
 test('estado reconhece nome, referente pronominal e contexto de nomes', async () => {

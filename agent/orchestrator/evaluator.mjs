@@ -34,6 +34,9 @@ function observedRun(run) {
   if (run.tool === 'code.validate' && Array.isArray(output?.results)) return { summary: `Validação de código ${output.valid ? 'aprovada' : 'reprovada'}.`, evidence: output.results.map(item => `${item.check}: exit code ${item.exitCode}`) };
   if (run.tool === 'agents.delegate' && Array.isArray(output?.children)) return { summary: `${output.children.length} subtarefas delegadas em paralelo.`, evidence: output.children.map(item => `${item.assignedAgent}: ${item.objective} (${item.id})`) };
   if (run.tool === 'agents.status' && Array.isArray(output?.tasks)) return { summary: `${output.tasks.length} subtarefas observadas; ${output.complete ? 'todas terminaram' : 'ainda há trabalho em andamento'}.`, evidence: output.tasks.map(item => `${item.assignedAgent}: ${item.status} — ${item.objective}`) };
+  if (run.tool === 'mcp.servers' && Array.isArray(output)) return { summary: `${output.length} servidor(es) MCP local(is) configurado(s).`, evidence: output.map(item => `${item.id}: ${item.enabled ? 'habilitado' : 'desabilitado'}`) };
+  if (run.tool === 'mcp.tools' && Array.isArray(output?.tools)) return { summary: `${output.tools.length} tools autorizadas descobertas em ${output.serverId}.`, evidence: output.tools.slice(0, 15).map(item => `${item.name}: risco ${item.risk}`) };
+  if (run.tool === 'mcp.call' && output?.serverId && output?.tool) return { summary: `${output.tool} respondeu pelo servidor ${output.serverId}.`, evidence: [`Google Workspace confirmou ${output.tool} (risco ${output.risk || 'desconhecido'}).`] };
   return { summary: `${run.tool} concluída.`, evidence: [`${run.tool}: ${run.status}`] };
 }
 
@@ -65,16 +68,19 @@ export function createEvaluator() {
       const asksForResearch = includesObjective(task.objective, /\b(pesquis|investig|busc|procure|internet|web)[a-z]*/);
       const asksForMedia = includesObjective(task.objective, /\b(imagem|ilustra|foto|video|audio|voz|narra)[a-z]*/);
       const asksForWebsite = includesObjective(task.objective, /\b(site|website|landing|pagina|homepage|loja|portfolio|interface web)\b/);
+      const asksForWorkspace = includesObjective(task.objective, /\b(gmail|google calendar|google sheets|google drive|calendario|agenda|e-?mail)\b/);
+      const workspaceEvidence = completedRuns.some(run => run.tool === 'mcp.call' && run.output?.serverId === 'google-workspace' && run.output?.tool);
       const failedRuns = runs.filter(run => run.status === 'failed');
       const acceptanceCriteria = [
         { criterion: 'O plano terminou sem etapas pendentes.', met: planCompleted },
-        ...(asksForMutation ? [{ criterion: 'A mudança solicitada produziu um artefato observado.', met: changedFiles }] : []),
+        ...(asksForMutation && !asksForWorkspace ? [{ criterion: 'A mudança solicitada produziu um artefato observado.', met: changedFiles }] : []),
         ...(asksForValidation || changedFiles ? [{ criterion: 'Uma validação relevante terminou com sucesso.', met: successfulCheck }] : []),
         ...(asksForResearch ? [{ criterion: 'A pesquisa produziu fontes ou páginas observadas.', met: researchEvidence }] : []),
         ...(asksForMedia ? [{ criterion: 'Um artefato de mídia real foi persistido.', met: mediaEvidence }] : []),
         ...(asksForWebsite && asksForMutation ? [{ criterion: 'O site passou por verificação visual desktop e mobile.', met: visualSiteEvidence }] : []),
+        ...(asksForWorkspace ? [{ criterion: 'A API Google retornou evidência para a operação solicitada.', met: workspaceEvidence }] : []),
       ];
-      const hardFailure = !planCompleted || completedRuns.length === 0 || (asksForMutation && !changedFiles) || (asksForValidation && !successfulCheck) || (asksForResearch && !researchEvidence) || (asksForMedia && !mediaEvidence) || (asksForWebsite && asksForMutation && !visualSiteEvidence);
+      const hardFailure = !planCompleted || completedRuns.length === 0 || (asksForMutation && !asksForWorkspace && !changedFiles) || (asksForValidation && !successfulCheck) || (asksForResearch && !researchEvidence) || (asksForMedia && !mediaEvidence) || (asksForWebsite && asksForMutation && !visualSiteEvidence) || (asksForWorkspace && !workspaceEvidence);
       const uncertain = !hardFailure && (failedRuns.length > 0 || (changedFiles && !successfulCheck));
       const verdict = hardFailure ? 'FAIL' : uncertain ? 'UNCERTAIN' : 'PASS';
       const validated = verdict === 'PASS';

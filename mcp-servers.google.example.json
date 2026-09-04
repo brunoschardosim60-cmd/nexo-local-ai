@@ -1,0 +1,41 @@
+{
+  "servers": [
+    {
+      "id": "google-workspace",
+      "name": "Google Workspace local",
+      "command": ".venv\\Scripts\\python.exe",
+      "args": ["-m", "src.server"],
+      "cwd": ".nexo-integrations/google-workspace-mcp",
+      "protocolVersion": "2025-06-18",
+      "enabled": true,
+      "env": {
+        "GOOGLE_OAUTH_SCOPES": "https://www.googleapis.com/auth/gmail.readonly,https://www.googleapis.com/auth/gmail.send,https://www.googleapis.com/auth/calendar.events,https://www.googleapis.com/auth/drive.file,https://www.googleapis.com/auth/spreadsheets"
+      },
+      "allowedTools": [
+        "gmail_search",
+        "gmail_read",
+        "gmail_send",
+        "gmail_list_labels",
+        "calendar_list_events",
+        "calendar_create_event",
+        "calendar_update_event",
+        "calendar_get_event",
+        "drive_search",
+        "drive_read_file",
+        "drive_create_file",
+        "drive_list_folder",
+        "sheets_read",
+        "sheets_write",
+        "sheets_create"
+      ],
+      "permissions": {
+        "gmail_send": "allow",
+        "calendar_create_event": "allow",
+        "calendar_update_event": "allow",
+        "drive_create_file": "allow",
+        "sheets_write": "allow",
+        "sheets_create": "allow"
+      }
+    }
+  ]
+}

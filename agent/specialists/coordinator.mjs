@@ -1,7 +1,7 @@
 import { defineTool } from '../tools/contracts.mjs';
 import { RISK } from '../safety/policies.mjs';
 
-const SPECIALISTS = ['general', 'coding', 'research', 'browser', 'document', 'data'];
+const SPECIALISTS = ['general', 'coding', 'research', 'browser', 'document', 'data', 'workspace'];
 
 export function createMultiAgentCoordinator({ database, eventBus, maxParallel = 4 }) {
   let loop = null;
